@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Read-only RoadLink CLI. Unimplemented actions cannot mutate the network."""
+import argparse
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'src'))
+from status import snapshot
+from hardware import capabilities
+
+parser = argparse.ArgumentParser(description='RoadLink network diagnostics')
+parser.add_argument('command', choices=['status', 'hardware', 'diagnostics'])
+args = parser.parse_args()
+state = snapshot()
+if args.command == 'hardware':
+    for item in state['interfaces']:
+        if item['wireless']:
+            item['capabilities'] = capabilities(item['interface'])
+    state = state['interfaces']
+print(json.dumps(state, ensure_ascii=False, indent=2))

@@ -1,0 +1,16 @@
+#!/bin/bash
+
+standardPromptAndActions='yes'
+
+# SetupHelper 9.4 selects its patch tool only for INSTALL/CHECK. UNINSTALL
+# still needs it to reverse our menu patch without removing other addons.
+if /data/SetupHelper/patch -v >/dev/null 2>&1; then
+    patch='/data/SetupHelper/patch --force --silent --reject-file=/dev/null'
+elif /data/SetupHelper/patchBookworm -v >/dev/null 2>&1; then
+    patch='/data/SetupHelper/patchBookworm --force --silent --reject-file=/dev/null'
+else
+    echo 'No compatible SetupHelper patch executable; leaving installed files unchanged.' >&2
+    exit 245
+fi
+
+source "/data/SetupHelper/HelperResources/IncludeHelpers"

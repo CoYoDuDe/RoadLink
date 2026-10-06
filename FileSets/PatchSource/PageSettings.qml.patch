@@ -1,0 +1,14 @@
+--- a/opt/victronenergy/gui/qml/PageSettings.qml
++++ b/opt/victronenergy/gui/qml/PageSettings.qml
+@@ -1,6 +1,11 @@
+ 		MbSubMenu {
+ 			description: qsTr("Wi-Fi")
+ 			subpage: Component { PageSettingsWifi {} }
++		}
++
++		MbSubMenu {
++			description: qsTr("RoadLink")
++			subpage: Component { PageSettingsRoadLink {} }
+ 		}
+ 
+ 		MbSubMenu {
