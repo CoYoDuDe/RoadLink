@@ -5,6 +5,12 @@ import "utils.js" as Utils
 MbPage {
     title: qsTr("RoadLink")
     model: VisibleItemModel {
+        MbSubMenu { description: qsTr("Fahrzeug-WLAN"); subpage: Component { PageRoadLinkAP {} } }
+        MbItemValue { description: qsTr("Aktueller WAN-Pfad"); item.bind: "com.coyodude.roadlink/Wan/Active" }
+        MbItemValue { description: qsTr("Verbundenes WLAN"); item.bind: "com.coyodude.roadlink/WifiWan/SSID" }
+        MbItemValue { description: qsTr("Internetstatus"); item.bind: "com.coyodude.roadlink/Wan/Health" }
+        MbItemValue { description: qsTr("WAN-Umschaltung"); item.bind: "com.coyodude.roadlink/Wan/Reason" }
+        MbItemValue { description: qsTr("Beschleunigung"); item.bind: "com.coyodude.roadlink/Wan/Acceleration" }
         MbItemValue { description: qsTr("Betriebszustand"); item.bind: "com.coyodude.roadlink/Status" }
         MbItemValue { description: qsTr("Starlink / Ethernet"); item.bind: "com.coyodude.roadlink/Ethernet" }
         MbItemValue { description: qsTr("USB-WLAN"); item.bind: "com.coyodude.roadlink/WifiWan" }

@@ -32,6 +32,10 @@ def inspect_interfaces(sys_class_net='/sys/class/net'):
         driver = driver_link.resolve().name if driver_link.exists() else ''
         usb = next((p for p in [device, *device.parents] if (p / 'idVendor').exists()), None)
         wireless = (link / 'phy80211').exists() or (link / 'wireless').exists()
+        if wireless and name.startswith('ap'):
+            # Native Venus/ConnMan reserve ap* for virtual AP interfaces. They
+            # must not count as another physical radio when resolving roles.
+            continue
         serial = read(usb / 'serial') if usb else ''
         if serial and not serial.strip('0'):
             serial = ''  # MT7612 adapters commonly report the non-unique 000000000.

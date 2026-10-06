@@ -3,7 +3,7 @@
 Observed on a Raspberry Pi 4 running Venus OS v3.81, 2026-10-06.
 
 - Venus owns ConnMan 1.33, the system wpa_supplicant and a loopback-only dnsmasq 2.90. ConnMan stores profiles under `/data/var/lib/connman`.
-- The stock Raspberry Pi image lacked hostapd and its Venus service template. Official Venus packages hostapd 2.10 and wireguard-tools were subsequently installed for development; neither an AP nor a tunnel has been activated. A WireGuard kernel module is already packaged.
+- The stock Raspberry Pi image lacked hostapd and its Venus service template. Official Venus packages hostapd 2.10 and wireguard-tools were installed for development. RoadLink now runs a LAN-only AP on its own ConnMan-excluded virtual interface. No tunnel is active. A WireGuard kernel module is already packaged.
 - Other Venus boards use `ap0`, a hostapd service template, and a dedicated AP configuration of the Venus dnsmasq package. `venus-platform` exposes AP controls only when the service template exists.
 - ConnMan excludes names beginning with `ap`, `disabled` and `ll`. This is relevant to single ownership of AP interfaces.
 - The internal brcmfmac radio supports AP mode. The external MT7612U/mt76x2u radio supports managed and AP modes with two transmit/receive chains. Its serial number is all zeroes and cannot identify a unique adapter; discovery falls back to its USB topology.
@@ -21,6 +21,6 @@ Root-owned persistent configuration belongs outside the replaceable `/data/RoadL
 
 ## Current implementation limits
 
-Hardware discovery, WAN selection policy, MAC derivation and a file journal exist. A read-only DBus service, CLI and classic native GUI have passed install/uninstall/reinstall on the Pi. There is no deployed AP, routing backend, VPN, DNS enforcement, captive portal assistant, client manager, web UI or GUI v2 integration yet. Passing local policy tests does not verify any live security property.
+Hardware discovery, WAN selection policy, MAC derivation and a file journal exist. A DBus service, CLI, classic native GUI and isolated AP have passed install/uninstall/reinstall on the Pi. AP startup checks hostapd's ENABLED state before reporting availability. A separate guard owns cleanup and holds the runtime lock through cleanup; failed cleanup prevents a new AP or installation/removal. There is no routing backend, VPN, DNS enforcement, captive portal assistant, client manager, web UI or GUI v2 integration yet. Passing local policy tests does not verify any live security property.
 
 References: [SetupHelper guidelines](https://github.com/kwindrem/SetupHelper/blob/main/PackageDevelopmentGuidelines.md), [Venus platform](https://github.com/victronenergy/venus-platform), [Venus package recipes](https://github.com/victronenergy/meta-victronenergy).

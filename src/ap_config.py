@@ -45,4 +45,3 @@ def isolated_dhcp(interface, subnet):
     return ('interface={}\nbind-interfaces\nport=0\nno-resolv\nno-hosts\n'
             'dhcp-range={},{},255.255.255.0,1h\ndhcp-option=3\ndhcp-option=6\n'
             'dhcp-leasefile=/run/roadlink/ap.leases\n').format(interface, net[20], net[200])
-

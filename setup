@@ -1,6 +1,6 @@
 #!/bin/bash
 
-standardPromptAndActions='yes'
+standardPromptAndActions='no'
 
 # SetupHelper 9.4 selects its patch tool only for INSTALL/CHECK. UNINSTALL
 # still needs it to reverse our menu patch without removing other addons.
@@ -14,3 +14,17 @@ else
 fi
 
 source "/data/SetupHelper/HelperResources/IncludeHelpers"
+
+if [ "$scriptAction" = 'NONE' ]; then
+    standardActionPrompt
+fi
+if [ "$scriptAction" = 'INSTALL' ] || [ "$scriptAction" = 'UNINSTALL' ]; then
+    if [ -d /service/com.coyodude.roadlink ]; then
+        svc -d /service/com.coyodude.roadlink
+    fi
+    if ! python3 "$scriptDir/src/ap_runtime.py" stop; then
+        logMessage 'RoadLink AP cleanup failed; leaving installed files intact'
+        exit 245
+    fi
+fi
+endScript 'INSTALL_FILES' 'INSTALL_SERVICES' 'ADD_DBUS_SETTINGS'
