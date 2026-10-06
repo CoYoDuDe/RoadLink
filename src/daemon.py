@@ -41,8 +41,8 @@ def main():
         '/Security': 'Noch nicht aktiv', '/LastUpdate': 0,
         '/AP/Status': 'Aus', '/AP/Address': '',
         '/WifiWan/SSID': 'Nicht verbunden', '/WifiWan/State': 'Unbekannt',
-        '/Wan/Active': '', '/Wan/Reason': 'Automatische Umschaltung noch nicht aktiv',
-        '/Wan/Health': 'Internet noch nicht geprueft',
+        '/Wan/Active': '', '/Wan/Reason': 'Noch nicht aktiv',
+        '/Wan/Health': 'Noch nicht geprueft',
         '/Wan/Acceleration': 'Keine Buendelung aktiv',
     }.items():
         service.add_path(path, value, writeable=False)
@@ -122,3 +122,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
