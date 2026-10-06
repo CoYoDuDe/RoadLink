@@ -19,6 +19,22 @@ MbPage {
             writeAccessLevel: User.AccessInstaller
         }
         MbItemValue { description: qsTr("Status"); item.bind: "com.coyodude.roadlink/AP/Status" }
+        MbEditBox {
+            id: passwordEditor
+            description: qsTr("Passwort setzen")
+            item.bind: "com.coyodude.roadlink/AP/NewPassword"
+            maximumLength: 63
+            enableSpaceBar: true
+            overwriteMode: false
+            writeAccessLevel: User.AccessInstaller
+            textInput.text: editMode ? new Array(_editText.length + 1).join("*") : qsTr("Neu eingeben")
+            function getEditText() { return "" }
+            function editTextToValue() {
+                return /^[\x20-\x7e]{8,63}$/.test(_editText) ? _editText : null
+            }
+            onEditModeChanged: if (!editMode) _editText = ""
+        }
+        MbItemValue { description: qsTr("Passwortstatus"); item.bind: "com.coyodude.roadlink/AP/PasswordStatus" }
         MbItemValue { description: qsTr("Lokale IP-Adresse"); item.bind: "com.coyodude.roadlink/AP/Address" }
         MbItemText { text: qsTr("Internetfreigabe noch nicht aktiv") }
     }

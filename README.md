@@ -1,6 +1,6 @@
 # RoadLink
 
-Venus OS networking addon using kwindrem SetupHelper. **Development release v0.2: diagnostics and an isolated local vehicle AP.**
+Venus OS networking addon using kwindrem SetupHelper. **Development release v0.3: diagnostics and an isolated local vehicle AP with native password entry.**
 
 The native GUI at Settings → RoadLink shows the default WAN interface, connected USB WLAN and explicit Internet/failover/protection limits. Its vehicle-WLAN page controls the AP and its SSID and shows its local address. `/data/RoadLink/roadlink status`, `hardware` and `diagnostics` provide diagnostics.
 
@@ -12,6 +12,8 @@ The source also contains stable per-profile MAC derivation, WAN selection policy
 
 An independent AP guard cleans up owned processes, interface and firewall rules if the controller exits or its heartbeat stalls. Setup waits for this cleanup before installation/removal. `roadlink safe-mode` disables AP activation while preserving Ethernet. This AP-specific guard is not yet full WAN recovery.
 
-Pending: WLAN profile management in the GUI, AP password editing in the GUI, known-WLAN automatic connections, Ethernet/WLAN switching, DNSmith/WireGuard enforcement, captive portals, client management and complete UI. No bandwidth bonding is active. Never interpret link carrier or the default route as a successful Internet/security check.
+The vehicle-WLAN page includes masked password entry (8–63 printable ASCII characters). Saving restarts the vehicle AP and disconnects its clients. The write-only password BusItem never publishes its submitted value through GetValue, GetItems or change signals; only a result status is exposed. The existing password is never shown. Native Ethernet settings remain available for recovery. Native Wi-Fi settings remain unchanged until RoadLink can safely take full ownership of external WLAN management.
+
+Pending: WLAN profile management in the GUI, known-WLAN automatic connections, Ethernet/WLAN switching, DNSmith/WireGuard enforcement, captive portals, client management and complete UI. No bandwidth bonding is active. Never interpret link carrier or the default route as a successful Internet/security check.
 
 Tests stay outside this repository and device packages. See `docs/ARCHITECTURE.md` for integration constraints.

@@ -19,7 +19,9 @@ from gi.repository import GLib
 from vedbus import VeDbusService
 from settingsdevice import SettingsDevice
 from status import snapshot, role_text
-from storage import load_json
+from storage import load_json, write_json
+from ap_config import hostapd
+from secret_item import SecretItem
 from ap_runtime import ROOT as AP_ROOT, SECRET as AP_SECRET, token, alive
 from wifi import networks
 
@@ -34,18 +36,32 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.2',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.3',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
         '/Security': 'Noch nicht aktiv', '/LastUpdate': 0,
         '/AP/Status': 'Aus', '/AP/Address': '',
+        '/AP/PasswordStatus': 'Gesetzt' if AP_SECRET.exists() else 'Bitte festlegen',
         '/WifiWan/SSID': 'Nicht verbunden', '/WifiWan/State': 'Unbekannt',
         '/Wan/Active': '', '/Wan/Reason': 'Noch nicht aktiv',
         '/Wan/Health': 'Noch nicht geprueft',
         '/Wan/Acceleration': 'Keine Buendelung aktiv',
     }.items():
         service.add_path(path, value, writeable=False)
+
+    def save_ap_password(path, password):
+        try:
+            hostapd('aproadlink', str(settings['ap_ssid']), password)
+            write_json(AP_SECRET, {'password': password})
+        except (ValueError, OSError):
+            service['/AP/PasswordStatus'] = 'Fehler: 8-63 ASCII-Zeichen'
+            return False
+        service['/AP/PasswordStatus'] = 'Gespeichert'
+        return True
+
+    service.add_path('/AP/NewPassword', '', writeable=True,
+                     onchangecallback=save_ap_password, itemtype=SecretItem)
     service.register()
     worker = None
     signature = None
@@ -122,4 +138,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
