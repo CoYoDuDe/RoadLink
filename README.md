@@ -1,6 +1,6 @@
 # RoadLink
 
-Venus OS networking addon using kwindrem SetupHelper. **Development release v0.8: vehicle AP Internet through guarded WireGuard, DNSmith and native WLAN profile management.**
+Venus OS networking addon using kwindrem SetupHelper. **Development release v0.8.1: vehicle AP Internet through guarded WireGuard, DNSmith and native WLAN profile management.**
 
 `roadlink vpn-public-key` generates or reuses a WireGuard key locally on the device and prints only its public key. The private key remains mode 0600 outside the package; a lock prevents concurrent provisioning from replacing it. This command does not activate a tunnel or change routes. DNSmith can register this public key without receiving the client's private key.
 
@@ -27,3 +27,5 @@ The saved-WLAN list includes a new-profile entry. Open a profile and select Edit
 Pending: WLAN scan-and-select, measured network ranking, portable import/export, known-WLAN automatic connections, Ethernet/WLAN switching, external-WLAN identity/DNS enforcement, captive portals, client management and complete UI. No bandwidth bonding is active. Never interpret link carrier or the default route as a successful Internet/security check.
 
 Tests stay outside this repository and device packages. See `docs/ARCHITECTURE.md` for integration constraints.
+
+The next USB-WAN backend has validated station/DHCP primitives (`wan_config.py`, `wan_dhcp.py`). On the development Pi, the MT7612U PHY was temporarily isolated in a network namespace after release from native ConnMan/wpa_supplicant; its original name, MAC and IPv6 setting were restored afterward. A known authorized WLAN authenticated using its saved private profile MAC, acquired DHCP and passed verified HTTPS. Outgoing physical-station DISCOVER/REQUEST captures contained no hostname, FQDN, vendor class, client ID or user class; IPv6 and local discovery were absent during that test. Venus 3.81 rejects the P2P configuration field, so this station configuration omits it and the test verifies a single managed interface. The DHCP hook requires the exact owned network namespace and ignores supplied DNS, hostnames and classless routes. These helpers are not yet a permanent controller: automatic association and WAN failover remain pending. A network can still observe its associated client and radio characteristics; these controls do not make the client invisible.

@@ -53,7 +53,7 @@ if args.command in ('configure-vpn', 'vpn-disable'):
                   'address': args.address, 'dns': args.dns, 'port': args.port})
         except (ValueError, KeyError):
             parser.error('Invalid VPN configuration')
-        print('VPN configuration saved. AP Internet forwarding requires the next integration stage.')
+        print('VPN configuration saved. The vehicle AP uses VPN Internet when guarded routing and tunnel/DNS are ready.')
     sys.exit(0)
 if args.command == 'vpn-public-key':
     from wireguard import ensure_public_key
