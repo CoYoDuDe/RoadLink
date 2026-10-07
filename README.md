@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.15 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.16 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -12,6 +12,8 @@ Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
 - Branch: `main`
 
 Danach **Einstellungen → RoadLink** öffnen. Benötigt werden die Venus-Pakete `hostapd`, `dnsmasq` und WireGuard. Fehlende Abhängigkeiten werden derzeit noch nicht automatisch installiert.
+
+Die Startseite zeigt den Internetpfad, das verbundene WLAN und den Status. Unter **Fahrzeug-WLAN**, **Externe WLANs**, **Internet und Umschaltung** und **Diagnose** liegen die jeweiligen Einstellungen.
 
 ## Erste Einrichtung
 

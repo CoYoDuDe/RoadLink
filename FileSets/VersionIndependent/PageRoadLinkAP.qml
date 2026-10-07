@@ -36,6 +36,7 @@ MbPage {
         }
         MbItemValue { description: qsTr("Passwortstatus"); item.bind: "com.coyodude.roadlink/AP/PasswordStatus" }
         MbItemValue { description: qsTr("Lokale IP-Adresse"); item.bind: "com.coyodude.roadlink/AP/Address" }
-        MbItemText { text: qsTr("Internetfreigabe noch nicht aktiv") }
+        MbItemText { text: qsTr("Eigenes DHCP und Fahrzeugnetz") }
+        MbItemText { text: qsTr("Zugriffe aus fremden WLANs gesperrt") }
     }
 }
