@@ -69,4 +69,6 @@ Updates und Deinstallation laufen über SetupHelper. Eigene Zugangsdaten und Sch
 
 ## Unterstützung
 
-Die Pakete sind kostenlos. Freiwillige Unterstützung: [PayPal](https://paypal.me/CoYoDuDe), [Buy Me a Coffee](https://www.buymeacoffee.com/CoYoDuDe), [weitere Projekte](https://dnsmith.net/). Kein Abo-Zwang.
+RoadLink ist kostenlos. Der geplante Standard für VPN und DNS ist [DNSmith.net](https://dnsmith.net/); die automatische VPN-Einrichtung wird noch umgesetzt.
+
+Mit einer freiwilligen Spende unterstützt du RoadLink und DNSmith: [PayPal](https://paypal.me/CoYoDuDe) oder [Buy Me a Coffee](https://www.buymeacoffee.com/CoYoDuDe). Die Nutzung ist nicht an eine Spende gebunden.
