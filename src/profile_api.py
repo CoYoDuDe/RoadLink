@@ -17,7 +17,7 @@ def install(service):
             pending[:] = ['', 0, None]
         return True
 
-    for name, value in [('SSID', ''), ('Security', 'psk'), ('Priority', 50), ('AutoConnect', 0)]:
+    for name, value in [('SSID', ''), ('Security', 'psk'), ('Priority', 50), ('AutoConnect', 0), ('LastResort', 0)]:
         service.add_path('/Wifi/Draft/' + name, value, writeable=True, onchangecallback=draft_changed)
 
     def expire():
@@ -29,6 +29,7 @@ def install(service):
 
     def publish():
         service['/Wifi/Profiles'] = json.dumps(Profiles().metadata(), ensure_ascii=False)
+        return True
 
     def edit(path, value):
         pending[:] = ['', 0, None]
@@ -54,8 +55,8 @@ def install(service):
         else:
             service['/Wifi/EditStatus'] = 'Neues WLAN' if value == 'new' else 'Passwort bleibt bei leerer Eingabe'
         for name, field, default in [('SSID', 'ssid', ''), ('Security', 'security', 'psk'),
-                                     ('Priority', 'priority', 50), ('AutoConnect', 'autoconnect', False)]:
-            service['/Wifi/Draft/' + name] = int(profile.get(field, default)) if name == 'AutoConnect' else profile.get(field, default)
+                                     ('Priority', 'priority', 50), ('AutoConnect', 'autoconnect', False), ('LastResort', 'last_resort', False)]:
+            service['/Wifi/Draft/' + name] = int(profile.get(field, default)) if name in ('AutoConnect', 'LastResort') else profile.get(field, default)
         return bool(profile) or value == 'new'
 
     def password(path, value):
@@ -75,7 +76,8 @@ def install(service):
             password_value = pending[0] if time.monotonic() < pending[1] and pending[2] == identity else ''
             Profiles().save(str(service['/Wifi/Draft/SSID']), str(service['/Wifi/Draft/Security']),
                             password_value, int(service['/Wifi/Draft/Priority']),
-                            bool(service['/Wifi/Draft/AutoConnect']), edit_id=editing[0])
+                            bool(service['/Wifi/Draft/AutoConnect']), edit_id=editing[0],
+                            last_resort=bool(service['/Wifi/Draft/LastResort']))
             pending[:] = ['', 0, None]
             publish()
             service['/Wifi/EditStatus'] = 'Profil gespeichert'
@@ -98,3 +100,4 @@ def install(service):
                            ('/Wifi/Forget', forget), ('/Wifi/Edit', edit)]:
         service.add_path(path, '', writeable=True, itemtype=SecretItem, onchangecallback=callback)
     publish()
+    GLib.timeout_add_seconds(3, publish)

@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.14 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.15 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -27,7 +27,8 @@ Das Fahrzeug-WLAN heißt bei Neuinstallation **RoadLink**. Es gibt kein gemeinsa
 - Eigenes Fahrzeug-WLAN mit WPA2 und getrennten WLAN-Clients.
 - Externe WLANs suchen, hinzufügen, bearbeiten und entfernen; WPA2 oder offen.
 - Gespeicherte, freigegebene WLANs automatisch verbinden; Priorität selbst festlegen.
-- Optional unbekannte offene WLANs automatisch suchen und prüfen. Der Schalter startet ausgeschaltet. Fehlgeschlagene Netze werden mit Wartezeit erneut geprüft; gefundenes WLAN wird nicht automatisch gespeichert.
+- Optional unbekannte offene WLANs automatisch suchen und prüfen. Der Schalter startet ausgeschaltet. Erst nach bestätigtem VPN-, DNS- und Internetzugang über dieses WLAN wird es als bekanntes Netz gespeichert. Fehlgeschlagene Netze werden mit Wartezeit erneut geprüft.
+- Profile als letzte Reserve markieren; normale bekannte oder gefundene offene Netze erhalten Vorrang. Innerhalb der Gruppe entscheidet die eingestellte Priorität.
 - Optionalen Gerätenamen für externe WLANs einstellen; leer sendet keinen DHCP-Namen. Der Betreiber kann eine eigene Bezeichnung anzeigen. Der Fahrzeug-WLAN-Name ist unabhängig davon.
 - Ethernet/Starlink oder USB-WLAN für den verschlüsselten VPN-Tunnel wählen.
 - Aktives Netz, verbundenes WLAN und geprüften Internet-/DNS-Status im klassischen Venus-Menü sehen.
@@ -36,6 +37,16 @@ Das Fahrzeug-WLAN heißt bei Neuinstallation **RoadLink**. Es gibt kein gemeinsa
 **Das Fahrzeug-WLAN erhält Internet nur über den geprüften VPN-Tunnel.** Eine WLAN-Verbindung oder IP-Adresse allein reicht nicht. Ethernet und SSH für den Gerätezugang bleiben erhalten. WLAN-Betreiber können weiterhin einen verbundenen Teilnehmer erkennen; RoadLink macht ihn nicht unsichtbar.
 
 ## Verbindungsmodi
+
+### Fahrzeugnetz und VPN
+
+Der Pi vergibt im Fahrzeug-WLAN eigene IP-Adressen per DHCP. Das externe WLAN wird nicht mit dem Fahrzeugnetz verbunden. Die Firewall sperrt neue Zugriffe von außen; der WLAN-Betreiber sieht keine einzelnen Fahrzeuggeräte als eigene WLAN- oder DHCP-Clients. Einen verbundenen Pi und dessen Verkehr kann er weiterhin erkennen.
+
+Der VPN-Tunnel führt vom Pi zu einem externen WireGuard-Server. DNSmith wird auf diesem Gerät verwendet; andere Installationen benötigen ihre eigene Serverkonfiguration. Der Server ist die Gegenstelle für den verschlüsselten Internetverkehr. Ein rein lokaler VPN auf dem Pi ersetzt diese Gegenstelle nicht.
+
+Geplant sind zwei getrennte Schalter: **DNSmith-VPN** und **DNSmith-DNS**, beide als Standard aktiviert. Bei Abwahl erscheinen die Felder für einen eigenen VPN-Anbieter beziehungsweise primären und sekundären DNS. Das ist von **Internet ohne VPN** zu unterscheiden. Neue Installationen benötigen eigene Schlüssel und eine eigene Clientregistrierung. Diese Anbieter-Einrichtung ist noch nicht verfügbar.
+
+Ein ausdrücklicher Modus **Internet ohne VPN** ist ebenfalls geplant. Auch dort müssen eigenes DHCP, NAT, Firewall und die Sperre neuer eingehender Zugriffe erhalten bleiben. Ohne VPN entfällt dessen Verschlüsselung gegenüber dem externen WLAN. **Dieser Modus ist noch nicht verfügbar:** VPN-Abschalten sperrt derzeit das Fahrzeug-Internet. Es gibt keinen stillen unverschlüsselten Rückfall.
 
 | Modus | Verhalten |
 |---|---|

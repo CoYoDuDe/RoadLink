@@ -248,7 +248,8 @@ def serve(parent_pid, parent_start):
                    'dns_ready': bool(fresh and dns_ready), 'internet': bool(fresh and dns_ready and tunnel_https),
                    'handshake': handshake, 'endpoint': config['endpoint'],
                    'address': config['address'], 'dns': config['dns'], 'wan': active or '', 'health': health,
-                   'mode': mode, 'wifi_penalty_profile': wifi_penalty_profile,
+                   'mode': mode, 'wifi_profile_id': (selected_route or {}).get('profile_id', '') if active == 'wifi' else '',
+                   'wifi_penalty_profile': wifi_penalty_profile,
                    'penalties': {key: time.monotonic() < expiry for key, expiry in penalties.items()}})
         time.sleep(1)
     # The independent guard owns final cleanup and keeps the flock until done.

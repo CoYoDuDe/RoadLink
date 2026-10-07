@@ -348,6 +348,12 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False):
                        'address': lease.get('address', '') if leased else '', 'internet': False, 'bridge': bridge})
             failed = (supplicant and supplicant.poll() is not None) or (dhcp and dhcp.poll() is not None)
             vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
+            if (leased and profile.get('discovered') and vpn_state.get('state') == 'READY'
+                    and vpn_state.get('internet') and vpn_state.get('dns_ready')
+                    and vpn_state.get('wifi_profile_id') == profile['id']
+                    and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {}))):
+                Profiles().remember_open(profile['ssid'])
+                profile['discovered'] = False
             tunnel_failed = (leased and vpn_state.get('penalties', {}).get('wifi', False)
                              and vpn_state.get('wifi_penalty_profile') == profile['id'])
             if failed or health_failures >= 2 or tunnel_failed or (supplicant and not leased and time.monotonic() - started > 45):

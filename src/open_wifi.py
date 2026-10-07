@@ -16,8 +16,11 @@ class Candidates:
         self.blocked[identifier] = now + min(900, 60 * 2 ** (count - 1))
 
     def select(self, scan, wall_time, now):
-        choices = sorted((p for p in self.profiles if p['autoconnect']),
+        choices = sorted((p for p in self.profiles if p['autoconnect'] and not p.get('last_resort', False)),
                          key=lambda p: (-p['priority'], p['ssid']))
+        fallback = sorted((p for p in self.profiles if p['autoconnect'] and p.get('last_resort', False)),
+                          key=lambda p: (-p['priority'], p['ssid']))
+        fresh = 0 <= wall_time - scan.get('timestamp', 0) <= 180
         if self.enabled and scan.get('state') == 'COMPLETE' and 0 <= wall_time - scan.get('timestamp', 0) <= 180:
             # Disabled saved networks and encrypted networks may not reappear
             # as anonymous open candidates, including security downgrades.
@@ -30,4 +33,7 @@ class Candidates:
                 choices.append({'id': identifier, 'ssid': ssid, 'security': 'open', 'password': '',
                                 'priority': 0, 'autoconnect': True, 'vpn_required': True,
                                 'mac': profile_mac(self.seed, identifier), 'discovered': True})
+        # With auto-open enabled, search once before using last-resort WLANs.
+        if not self.enabled or (fresh and scan.get('state') in ('COMPLETE', 'FAILED')):
+            choices += fallback
         return next((p for p in choices if now >= self.blocked.get(p['id'], 0)), None)

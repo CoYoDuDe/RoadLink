@@ -28,6 +28,7 @@ MbPage {
         RoadLinkPasswordEditor { description: qsTr("Passwort eingeben"); item.bind: "com.coyodude.roadlink/Wifi/Draft/Password" }
         MbEditBox { description: qsTr("Prioritaet 0-100"); item.bind: "com.coyodude.roadlink/Wifi/Draft/Priority"; maximumLength: 3; numericOnlyLayout: true; writeAccessLevel: User.AccessInstaller }
         MbSwitch { name: qsTr("Automatisch verbinden"); bind: "com.coyodude.roadlink/Wifi/Draft/AutoConnect"; valueTrue: 1; valueFalse: 0; writeAccessLevel: User.AccessInstaller }
+        MbSwitch { name: qsTr("Nur als letzte Reserve"); bind: "com.coyodude.roadlink/Wifi/Draft/LastResort"; writeAccessLevel: User.AccessInstaller }
         MbItemOptions {
             description: qsTr("Profil speichern")
             bind: "com.coyodude.roadlink/Wifi/Draft/Save"
