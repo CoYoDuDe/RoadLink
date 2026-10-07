@@ -4,3 +4,5 @@
 /opt/victronenergy/gui/qml/PageRoadLinkWifiAdd.qml
 /opt/victronenergy/gui/qml/PageRoadLinkWifiProfiles.qml
 /opt/victronenergy/gui/qml/PageRoadLinkWifiProfile.qml
+/opt/victronenergy/gui/qml/PageRoadLinkScan.qml
+/opt/victronenergy/gui/qml/PageRoadLinkScanResults.qml

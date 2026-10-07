@@ -15,10 +15,30 @@ fi
 
 source "/data/SetupHelper/HelperResources/IncludeHelpers"
 
+# SetupHelper 9.4 can promote an updated addon-only file to .orig even
+# when NO_ORIG already records that no native file existed. Preserve that
+# marker for our dedicated QML files; delegate every other backup unchanged.
+eval "$(declare -f backupActiveFile | sed '1s/backupActiveFile/roadlinkOriginalBackupActiveFile/')"
+backupActiveFile ()
+{
+    case "$1" in
+        /opt/victronenergy/gui/qml/PageRoadLink*.qml|/opt/victronenergy/gui/qml/PageSettingsRoadLink.qml|/opt/victronenergy/gui/qml/RoadLinkPasswordEditor.qml)
+            if [ -f "$1.NO_ORIG" ] && ! [ -e "$1.orig" ]; then
+                return 1
+            fi
+            ;;
+    esac
+    roadlinkOriginalBackupActiveFile "$@"
+}
+
 if [ "$scriptAction" = 'NONE' ]; then
     standardActionPrompt
 fi
 if [ "$scriptAction" = 'INSTALL' ] || [ "$scriptAction" = 'UNINSTALL' ]; then
+    if ! python3 "$scriptDir/src/qml_backups.py"; then
+        logMessage 'RoadLink GUI backup repair failed; leaving installed files intact'
+        exit 245
+    fi
     if [ -d /service/com.coyodude.roadlink ]; then
         svc -d /service/com.coyodude.roadlink
     fi

@@ -8,6 +8,7 @@ MbPage {
         MbSubMenu { description: qsTr("Fahrzeug-WLAN"); subpage: Component { PageRoadLinkAP {} } }
         MbSubMenu { description: qsTr("Externes WLAN hinzufuegen"); subpage: Component { PageRoadLinkWifiAdd {} } }
         MbSubMenu { description: qsTr("Gespeicherte WLANs"); subpage: Component { PageRoadLinkWifiProfiles {} } }
+        MbSubMenu { description: qsTr("WLANs suchen"); subpage: Component { PageRoadLinkScan {} } }
         MbSwitch { name: qsTr("USB-WLAN-Reserve aktivieren"); bind: "com.victronenergy.settings/Settings/RoadLink/WifiWan/Enabled" }
         MbItemValue { description: qsTr("USB-WLAN-Verbindung"); item.bind: "com.coyodude.roadlink/WifiWan/StateText" }
         MbItemOptions {

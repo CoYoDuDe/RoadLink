@@ -11,6 +11,8 @@ import time
 from ap_runtime import command, token, alive
 from hardware import inspect_interfaces, resolve_role, capabilities
 from profiles import Profiles
+from privacy import profile_mac
+from wan_scan import Scanner
 from storage import atomic_write, load_json, write_json
 from wan_config import station, dhcp_args
 from wan_bridge import plan, rules, ipv6_rules
@@ -63,7 +65,7 @@ def inside(args, check=True):
 
 
 def stop_children():
-    children = [load_json(ROOT / (name + '.json'), {}) for name in ('mutation', 'supplicant', 'dhcp', 'namespace_creator')]
+    children = [load_json(ROOT / (name + '.json'), {}) for name in ('scanner', 'mutation', 'supplicant', 'dhcp', 'namespace_creator')]
     for sig, seconds in ((signal.SIGTERM, 3), (signal.SIGKILL, 2)):
         for state in children:
             if alive(state):
@@ -96,6 +98,7 @@ def cleanup():
     errors = []
     try:
         stop_children()
+        (ROOT / 'scan-output').unlink(missing_ok=True)
         owned_netns.remove_placeholder(state, NS)
         wan_bridge_runtime.cleanup(ROOT, command)
         ns_path = Path('/run/netns') / NS
@@ -158,7 +161,7 @@ def guard(pid, start, lock_fd):
 
 
 def child(name, parent_pid, parent_start, args):
-    if name not in ('supplicant', 'dhcp', 'mutation'): raise ValueError('Unknown WLAN child')
+    if name not in ('supplicant', 'dhcp', 'mutation', 'scanner'): raise ValueError('Unknown WLAN child')
     write_json(ROOT / (name + '.json'), {'pid': os.getpid(), 'start': token(os.getpid())})
     if ((ROOT / 'stop').exists() or (ROOT / 'cleaning').exists()
             or not alive({'pid': parent_pid, 'start': parent_start})):
@@ -166,9 +169,9 @@ def child(name, parent_pid, parent_start, args):
     os.execvp(args[0], args)
 
 
-def launch(name, args):
+def launch(name, args, **kwargs):
     return subprocess.Popen([sys.executable, __file__, 'child', name, str(os.getpid()),
-                             token(os.getpid()), 'ip', 'netns', 'exec', NS, *args], stdin=subprocess.DEVNULL)
+                             token(os.getpid()), 'ip', 'netns', 'exec', NS, *args], stdin=subprocess.DEVNULL, **kwargs)
 
 
 def stop():
@@ -190,13 +193,14 @@ def serve(parent_pid, parent_start):
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     if Path('/run/netns/' + NS).exists() or Path('/sys/class/net/' + RADIO).exists():
         raise RuntimeError('WAN namespace/interface occupied')
-    profiles = sorted((p for p in Profiles().data['profiles'].values() if p['autoconnect']),
+    store = Profiles()
+    if not store.path.exists(): write_json(store.path, store.data)
+    profiles = sorted((p for p in store.data['profiles'].values() if p['autoconnect']),
                       key=lambda p: (-p['priority'], p['ssid']))
-    if not profiles: raise RuntimeError('No enabled known WLAN profile')
     for profile in profiles: station(profile, str(ROOT / 'control'))
     vpn = vpn_config()
-    if not vpn or not vpn['enabled']: raise RuntimeError('Enabled VPN configuration required')
-    firewall = plan(vpn['endpoint'], vpn['port'])
+    routable = bool(vpn and vpn['enabled'])
+    if not routable: profiles = []  # scan-only: no station association/DHCP
     dev = resolve_role(inspect_interfaces(), 'wifi_wan')
     name = dev['interface']
     cap = capabilities(name)
@@ -226,6 +230,7 @@ def serve(parent_pid, parent_start):
     else: raise RuntimeError('WAN guard not ready')
     signal.signal(signal.SIGTERM, lambda *_: (ROOT / 'stop').touch())
     signal.signal(signal.SIGINT, lambda *_: (ROOT / 'stop').touch())
+    scanner = Scanner(ROOT, launch)
     try:
         mutate(['ip', 'link', 'set', name, 'down'])
         Path('/proc/sys/net/ipv6/conf/' + name + '/disable_ipv6').write_text('1\n')
@@ -243,15 +248,25 @@ def serve(parent_pid, parent_start):
         for option in ('all', 'default'):
             mutate(['ip', 'netns', 'exec', NS, 'sysctl', '-qw', 'net.ipv6.conf.' + option + '.disable_ipv6=1'])
         # Rules exist before the radio can transmit DHCP or IP data.
-        firewall = wan_bridge_runtime.configuration(vpn, mutate)
-        for family, builder in (('iptables', rules(firewall, 'wan')), ('ip6tables', ipv6_rules('wan'))):
-            for table, chain, args in builder:
-                mutate(['ip', 'netns', 'exec', NS, family, '-w', '3', '-t', table, '-I', chain, '1', *args])
+        if routable:
+            firewall = wan_bridge_runtime.configuration(vpn, mutate)
+            for family, builder in (('iptables', rules(firewall, 'wan')), ('ip6tables', ipv6_rules('wan'))):
+                for table, chain, args in builder:
+                    mutate(['ip', 'netns', 'exec', NS, family, '-w', '3', '-t', table, '-I', chain, '1', *args])
+        else:
+            for family in ('iptables', 'ip6tables'):
+                for chain in ('INPUT', 'OUTPUT', 'FORWARD'):
+                    mutate(['ip', 'netns', 'exec', NS, family, '-w', '3', '-I', chain, '1',
+                            '-m', 'comment', '--comment', 'roadlink-wan-scan-owned', '-j', 'DROP'])
         mutate(['iw', 'phy', state['phy'], 'set', 'netns', 'name', NS])
         mutate(['ip', 'netns', 'exec', NS, 'sysctl', '-qw', 'net.ipv6.conf.' + RADIO + '.disable_ipv6=1'])
-        bridge = wan_bridge_runtime.start(ROOT, state, firewall, mutate, inside)
+        bridge = wan_bridge_runtime.start(ROOT, state, firewall, mutate, inside) if routable else None
+        if not profiles:
+            inside(['ip', 'link', 'set', RADIO, 'address', profile_mac(bytes.fromhex(store.data['seed']), 'passive-scan')])
+            inside(['ip', 'link', 'set', RADIO, 'up'])
         cursor, retry = 0, 0
         supplicant = dhcp = None
+        scan_paused = False
         started = 0
         while not (ROOT / 'stop').exists():
             if not alive({'pid': parent_pid, 'start': parent_start}): break
@@ -260,7 +275,29 @@ def serve(parent_pid, parent_start):
             pulse()
             if not any(v['ifindex'] == state['ifindex'] for v in radio_info(True)):
                 raise RuntimeError('USB radio unplugged')
+            if not profiles:
+                write_json(ROOT / 'status.json', {'state': 'SCAN_ONLY', 'ssid': '', 'internet': False,
+                           'driver': state['driver'], 'interface': RADIO, 'identity': state['identity']})
+                scanner.tick(True)
+                time.sleep(1)
+                continue
             profile = profiles[cursor % len(profiles)]
+            if scanner.pending() and (scan_paused or load_json(ROOT / 'status.json', {}).get('state') != 'LEASED'):
+                if not scan_paused:
+                    stop_children(); supplicant = dhcp = None
+                    inside(['ip', 'link', 'set', RADIO, 'down'])
+                    inside(['ip', '-4', 'addr', 'flush', 'dev', RADIO])
+                    inside(['ip', '-4', 'route', 'flush', 'default'], check=False)
+                    inside(['ip', 'link', 'set', RADIO, 'address', profile['mac']])
+                    inside(['ip', 'link', 'set', RADIO, 'up'])
+                    write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
+                    scan_paused = True
+                write_json(ROOT / 'status.json', {'state': 'SCAN_ONLY', 'ssid': '', 'internet': False,
+                           'driver': state['driver'], 'interface': RADIO, 'identity': state['identity'], 'bridge': bridge})
+                scanner.tick(True)
+                time.sleep(1)
+                continue
+            scan_paused = False
             if supplicant is None and time.monotonic() >= retry:
                 inside(['ip', 'link', 'set', RADIO, 'down'])
                 inside(['ip', '-4', 'addr', 'flush', 'dev', RADIO])
@@ -283,6 +320,7 @@ def serve(parent_pid, parent_start):
             if connected and dhcp is None:
                 dhcp = launch('dhcp', dhcp_args(RADIO, '/data/RoadLink/src/wan_dhcp.py'))
             leased = connected and dhcp and dhcp.poll() is None and lease.get('state') == 'LEASED'
+            scanner.tick(bool(leased))
             write_json(ROOT / 'status.json', {'state': 'LEASED' if leased else 'ASSOCIATED' if connected else 'CONNECTING',
                        'ssid': profile['ssid'] if connected else '', 'profile_id': profile['id'],
                        'identity': state['identity'], 'driver': state['driver'], 'interface': RADIO,
@@ -301,6 +339,7 @@ def serve(parent_pid, parent_start):
         sys.stderr.flush()
         raise
     finally:
+        scanner.close()
         (ROOT / 'stop').touch()
         # The independent guard stops this mutating controller before cleanup.
         if not alive(load_json(ROOT / 'guard.json', {})): cleanup()

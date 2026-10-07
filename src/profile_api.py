@@ -32,8 +32,21 @@ def install(service):
 
     def edit(path, value):
         pending[:] = ['', 0, None]
-        profile = {} if value == 'new' else Profiles().data['profiles'].get(value)
-        editing[0] = None if value == 'new' else value
+        if isinstance(value, str) and value.startswith('scan:'):
+            from scan_api import results
+            match = next((n for n in results() if n['id'] == value[5:] and n['security'] in ('psk', 'open')), None)
+            if not match:
+                editing[0] = None
+                service['/Wifi/Draft/SSID'] = ''
+                service['/Wifi/Draft/AutoConnect'] = 0
+                service['/Wifi/EditStatus'] = 'Suchergebnis abgelaufen oder nicht unterstuetzt'; return False
+            profile = next((p for p in Profiles().data['profiles'].values()
+                            if p['ssid'] == match['ssid'] and p['security'] == match['security']),
+                           {'ssid': match['ssid'], 'security': match['security']})
+            editing[0] = profile.get('id')
+        else:
+            profile = {} if value == 'new' else Profiles().data['profiles'].get(value)
+            editing[0] = None if value == 'new' else value
         if profile is None:
             editing[0] = None
             profile = {}

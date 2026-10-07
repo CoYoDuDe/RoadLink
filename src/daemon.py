@@ -25,6 +25,7 @@ from secret_item import SecretItem
 from ap_runtime import ROOT as AP_ROOT, SECRET as AP_SECRET, token, alive
 from wifi import networks
 from profile_api import install as install_profile_api
+from scan_api import install as install_scan_api
 from vpn_config import read as vpn_config
 from vpn_runtime import ROOT as VPN_ROOT
 from wan_runtime import ROOT as WAN_ROOT
@@ -42,7 +43,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.11',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.12',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -71,6 +72,7 @@ def main():
     service.add_path('/AP/NewPassword', '', writeable=True,
                      onchangecallback=save_ap_password, itemtype=SecretItem)
     install_profile_api(service)
+    install_scan_api(service)
     service.register()
     worker = None
     signature = None
@@ -158,7 +160,8 @@ def main():
             wan_state = load_json(WAN_ROOT / 'status.json', {})
             if wan_worker and alive(load_json(WAN_ROOT / 'guard.json', {})):
                 service['/WifiWan'] = 'Isolierter USB-Stick (' + wan_state.get('driver', 'startet') + ')'
-                service['/WifiWan/SSID'] = wan_state.get('ssid') or 'Verbindet bekanntes WLAN'
+                service['/WifiWan/SSID'] = wan_state.get('ssid') or ('Suchmodus, nicht verbunden'
+                    if wan_state.get('state') == 'SCAN_ONLY' else 'Verbindet bekanntes WLAN')
                 service['/WifiWan/State'] = wan_state.get('state', 'STARTING')
                 service['/Wan/Reason'] = ('WLAN als Reserve verbunden; VPN noch ueber Ethernet'
                     if wan_state.get('state') == 'LEASED' else 'Bekannte WLANs werden verbunden')
@@ -168,6 +171,7 @@ def main():
             service['/WifiWan/StateText'] = {
                 'LEASED': 'Verbunden', 'ASSOCIATED': 'Wartet auf IP-Adresse',
                 'CONNECTING': 'Verbindet', 'STARTING': 'Startet', 'OFF': 'Aus',
+                'SCAN_ONLY': 'Nur WLAN-Suche',
                 'CLEANUP_FAILED': 'Bereinigung fehlgeschlagen', 'missing': 'Nicht erkannt',
                 'ambiguous': 'Mehrere Funkmodule', 'idle': 'Nicht verbunden',
                 'online': 'Verbunden', 'ready': 'Verbunden', 'unavailable': 'Nicht verfuegbar',

@@ -3,6 +3,7 @@ import com.victron.velib 1.0
 MbPage {
     id: root
     property string profileId: ""
+    property string scanId: ""
     property bool initialized: false
     property VBusItem editRequest: VBusItem {
         bind: "com.coyodude.roadlink/Wifi/Edit"
@@ -10,7 +11,7 @@ MbPage {
     }
     function initializeEditor() {
         if (!initialized && editRequest.valid) {
-            editRequest.setValue(profileId || "new")
+            editRequest.setValue(profileId || (scanId ? "scan:" + scanId : "new"))
             initialized = true
         }
     }
@@ -22,7 +23,7 @@ MbPage {
             description: qsTr("Sicherheit")
             bind: "com.coyodude.roadlink/Wifi/Draft/Security"
             writeAccessLevel: User.AccessInstaller
-            possibleValues: [MbOption { description: qsTr("WPA/WPA2"); value: "psk" }, MbOption { description: qsTr("Offenes WLAN"); value: "open" }]
+            possibleValues: [MbOption { description: qsTr("WPA2"); value: "psk" }, MbOption { description: qsTr("Offenes WLAN"); value: "open" }]
         }
         RoadLinkPasswordEditor { description: qsTr("Passwort eingeben"); item.bind: "com.coyodude.roadlink/Wifi/Draft/Password" }
         MbEditBox { description: qsTr("Prioritaet 0-100"); item.bind: "com.coyodude.roadlink/Wifi/Draft/Priority"; maximumLength: 3; numericOnlyLayout: true; writeAccessLevel: User.AccessInstaller }
@@ -34,6 +35,6 @@ MbPage {
             possibleValues: [MbOption { description: qsTr("Abbrechen"); value: "" }, MbOption { description: qsTr("Speichern"); value: "save" }]
         }
         MbItemValue { description: qsTr("Ergebnis"); item.bind: "com.coyodude.roadlink/Wifi/EditStatus" }
-        MbItemText { text: qsTr("VPN-Verbindung noch nicht aktiv") }
+        MbItemText { text: qsTr("Internet wird nur ueber den VPN-Tunnel freigegeben.") }
     }
 }
