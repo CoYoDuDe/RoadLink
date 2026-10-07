@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.12.1 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.12.2 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -15,10 +15,10 @@ Danach **Einstellungen → RoadLink** öffnen. Benötigt werden die Venus-Pakete
 
 ## Erste Einrichtung
 
-1. VPN mit einem eigenen Server einrichten; Anleitung unter [Technik und Einrichtung](docs/ARCHITECTURE.md).
+1. USB-WLAN-Reserve einschalten und **WLANs suchen**. Ohne VPN arbeitet der Stick ausschließlich im Suchbetrieb.
 2. Für das Fahrzeug-WLAN ein eigenes Passwort festlegen und es einschalten.
-3. Mit einem passenden USB-WLAN-Stick **WLANs suchen**, ein Netz auswählen und speichern.
-4. Automatische Verbindung im gewünschten WLAN-Profil freigeben und die USB-WLAN-Reserve einschalten.
+3. VPN mit einem eigenen Server einrichten; Anleitung unter [Technik und Einrichtung](docs/ARCHITECTURE.md).
+4. Ein externes WLAN auswählen und speichern. Automatische Verbindung im gewünschten Profil freigeben.
 
 Das Fahrzeug-WLAN heißt bei Neuinstallation **RoadLink**. Es gibt kein gemeinsames Standardpasswort und keine vorgegebenen externen WLANs oder Serverzugänge. WLAN und USB-Reserve starten ausgeschaltet; der Verbindungsmodus ist `AUTO`. Bestehende Einstellungen bleiben bei Updates erhalten.
 

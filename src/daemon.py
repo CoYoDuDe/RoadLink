@@ -43,7 +43,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.12.1',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.12.2',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -99,7 +99,7 @@ def main():
                 and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists())
             vpn_current = repr(configuration) if vpn_requested else None
             profiles_path = Path('/data/setupOptions/RoadLink/wifi-profiles.json')
-            wan_requested = bool(settings['wan_enabled'] and vpn_requested)
+            wan_requested = bool(settings['wan_enabled'])
             wan_current = (repr(configuration), profiles_path.stat().st_mtime_ns
                            if profiles_path.exists() else 0) if wan_requested else None
             if wan_worker and wan_worker.poll() is not None:
