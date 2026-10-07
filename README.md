@@ -1,8 +1,12 @@
 # RoadLink
 
-Venus OS networking addon using kwindrem SetupHelper. **Development release v0.6: local AP, native WLAN profiles and device-local VPN key provisioning.**
+Venus OS networking addon using kwindrem SetupHelper. **Development release v0.7: local AP, native WLAN profiles and guarded device-local WireGuard controller.**
 
-`roadlink vpn-public-key` generates or reuses a WireGuard key locally on the device and prints only its public key. The private key remains mode 0600 outside the package; a lock prevents concurrent provisioning from replacing it. This command does not activate a tunnel or change routes. Server enrollment and protected WAN operation remain pending.
+`roadlink vpn-public-key` generates or reuses a WireGuard key locally on the device and prints only its public key. The private key remains mode 0600 outside the package; a lock prevents concurrent provisioning from replacing it. This command does not activate a tunnel or change routes. DNSmith can register this public key without receiving the client's private key.
+
+The separate VPN controller can be provisioned locally with `roadlink configure-vpn --endpoint PUBLIC_IPV4 --server-key PUBLIC_KEY --address CLIENT_IPV4/32 --dns VPN_DNS --enable`. Settings remain private outside the package; endpoint bootstrap uses a supplied public IPv4 address without an external DNS lookup. Only traffic explicitly sourced from the VPN address uses the dedicated routing table. Its unreachable fallback and source/interface firewall prevent that traffic from falling back to native Ethernet. Native management/default routes remain unchanged. The controller blocks IPv6 on its interface and does not provide AP forwarding yet. `roadlink vpn-disable` stops it reversibly; `roadlink vpn-status` shows its state. READY means a recent handshake and a successful DNS probe through the tunnel, not complete Internet protection for all Pi/AP traffic.
+
+An independent VPN guard retains the controller lock, kills a stalled controller before cleanup and removes its owned interface, policy route and IPv4/IPv6 rules. The status service retries after cleanup with a delay. SetupHelper waits for both AP and VPN cleanup before installation/removal. VPN settings and local keys survive uninstall/reinstall. Native GUI status shows the actual tunnel/DNS state and explicitly keeps the vehicle WLAN marked local-only until forwarding integration is complete.
 
 The native GUI at Settings → RoadLink shows the default WAN interface, connected USB WLAN and explicit Internet/failover/protection limits. Its vehicle-WLAN page controls the AP and its SSID and shows its local address. `/data/RoadLink/roadlink status`, `hardware` and `diagnostics` provide diagnostics.
 
@@ -20,6 +24,6 @@ External-WLAN profiles can be added by SSID, listed and forgotten in RoadLink's 
 
 The saved-WLAN list includes a new-profile entry. Open a profile and select Edit to load its SSID/security/priority/autoconnect settings. Saving edits preserves its identity and private MAC when renaming; leaving the password field untouched retains the existing password. Duplicate SSID/security combinations are rejected. Larger priority values appear first. Measured automatic ranking and phone import/export are not implemented yet.
 
-Pending: WLAN scan-and-select, measured network ranking, portable import/export, known-WLAN automatic connections, Ethernet/WLAN switching, DNSmith/WireGuard enforcement, captive portals, client management and complete UI. No bandwidth bonding is active. Never interpret link carrier or the default route as a successful Internet/security check.
+Pending: AP Internet forwarding through the tunnel, WLAN scan-and-select, measured network ranking, portable import/export, known-WLAN automatic connections, Ethernet/WLAN switching, external-WLAN identity/DNS enforcement, captive portals, client management and complete UI. No bandwidth bonding is active. Never interpret link carrier or the default route as a successful Internet/security check.
 
 Tests stay outside this repository and device packages. See `docs/ARCHITECTURE.md` for integration constraints.

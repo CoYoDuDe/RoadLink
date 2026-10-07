@@ -19,5 +19,7 @@ MbPage {
         MbItemValue { description: qsTr("Fahrzeug-AP: Funkmodul"); item.bind: "com.coyodude.roadlink/VehicleAp" }
         MbItemValue { description: qsTr("Standardroute"); item.bind: "com.coyodude.roadlink/DefaultInterface" }
         MbItemValue { description: qsTr("VPN-/DNS-Schutz"); item.bind: "com.coyodude.roadlink/Security" }
+        MbItemValue { description: qsTr("VPN-Verbindung"); item.bind: "com.coyodude.roadlink/VPN/Status" }
+        MbItemValue { description: qsTr("DNSmith"); item.bind: "com.coyodude.roadlink/VPN/DNS" }
     }
 }

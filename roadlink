@@ -16,14 +16,45 @@ from profiles import Profiles
 
 parser = argparse.ArgumentParser(description='RoadLink network diagnostics')
 parser.add_argument('command', choices=['status', 'hardware', 'diagnostics', 'configure-ap', 'ap-status', 'safe-mode',
-                                      'wifi-list', 'wifi-save', 'wifi-forget', 'vpn-public-key'])
+                                      'wifi-list', 'wifi-save', 'wifi-forget', 'vpn-public-key',
+                                      'configure-vpn', 'vpn-disable', 'vpn-status'])
 parser.add_argument('--ssid', default='breschdleng-roadlink')
 parser.add_argument('--generate', action='store_true', help='Generate a private AP password on this device')
 parser.add_argument('--security', choices=['psk', 'open'], default='psk')
 parser.add_argument('--priority', type=int, default=50)
 parser.add_argument('--autoconnect', action='store_true')
 parser.add_argument('--id', dest='profile_id')
+parser.add_argument('--endpoint')
+parser.add_argument('--server-key')
+parser.add_argument('--address')
+parser.add_argument('--dns')
+parser.add_argument('--port', type=int, default=51820)
+parser.add_argument('--enable', action='store_true')
 args = parser.parse_args()
+if args.command == 'vpn-status':
+    print(json.dumps(load_json('/run/roadlink-vpn/status.json', {'state': 'OFF'}), indent=2))
+    sys.exit(0)
+if args.command in ('configure-vpn', 'vpn-disable'):
+    if os.geteuid() != 0:
+        parser.error('Root required')
+    from vpn_config import read, save
+    if args.command == 'vpn-disable':
+        value = read()
+        if value:
+            save(dict(value, enabled=False))
+        print('VPN disable requested; native management route remains unchanged.')
+    else:
+        if not all((args.endpoint, args.server_key, args.address, args.dns)):
+            parser.error('--endpoint, --server-key, --address and --dns are required')
+        from wireguard import ensure_public_key
+        ensure_public_key()
+        try:
+            save({'enabled': args.enable, 'endpoint': args.endpoint, 'public_key': args.server_key,
+                  'address': args.address, 'dns': args.dns, 'port': args.port})
+        except (ValueError, KeyError):
+            parser.error('Invalid VPN configuration')
+        print('VPN configuration saved. AP Internet forwarding requires the next integration stage.')
+    sys.exit(0)
 if args.command == 'vpn-public-key':
     from wireguard import ensure_public_key
     print(ensure_public_key())

@@ -25,6 +25,8 @@ from secret_item import SecretItem
 from ap_runtime import ROOT as AP_ROOT, SECRET as AP_SECRET, token, alive
 from wifi import networks
 from profile_api import install as install_profile_api
+from vpn_config import read as vpn_config
+from vpn_runtime import ROOT as VPN_ROOT
 
 
 def main():
@@ -37,7 +39,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.6',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.7',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -48,6 +50,7 @@ def main():
         '/Wan/Active': '', '/Wan/Reason': 'Noch nicht aktiv',
         '/Wan/Health': 'Noch nicht geprueft',
         '/Wan/Acceleration': 'Keine Buendelung aktiv',
+        '/VPN/Status': 'Aus', '/VPN/DNS': 'Nicht geprueft',
     }.items():
         service.add_path(path, value, writeable=False)
 
@@ -68,10 +71,42 @@ def main():
     worker = None
     signature = None
     failed = None
+    vpn_worker = None
+    vpn_signature = None
+    vpn_retry_at = 0
 
     def refresh():
-        nonlocal worker, signature, failed
+        nonlocal worker, signature, failed, vpn_worker, vpn_signature, vpn_retry_at
         try:
+            import time
+            vpn_invalid = False
+            try:
+                configuration = vpn_config()
+            except (ValueError, KeyError, OSError):
+                configuration, vpn_invalid = None, True
+            vpn_requested = bool(configuration and configuration['enabled']
+                and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists())
+            vpn_current = repr(configuration) if vpn_requested else None
+            if vpn_worker and vpn_worker.poll() is not None:
+                vpn_worker = None
+                vpn_retry_at = time.monotonic() + 15
+            if vpn_worker and vpn_current != vpn_signature:
+                (VPN_ROOT / 'stop').touch()
+            elif (not vpn_worker and vpn_requested and time.monotonic() >= vpn_retry_at
+                  and not alive(load_json(VPN_ROOT / 'guard.json', {}))):
+                result = load_json(VPN_ROOT / 'result.json', {'cleaned': True})
+                if result.get('cleaned'):
+                    vpn_signature = vpn_current
+                    vpn_worker = subprocess.Popen([sys.executable,
+                        str(Path(__file__).with_name('vpn_runtime.py')), 'serve',
+                        str(os.getpid()), token(os.getpid())])
+            vpn_state = load_json(VPN_ROOT / 'status.json', {})
+            service['/VPN/Status'] = ('Konfiguration ungueltig' if vpn_invalid else
+                'Tunnel und DNS bereit' if vpn_worker and vpn_state.get('state') == 'READY'
+                else 'Verbindet' if vpn_worker else 'Fehler: Bereinigung pruefen'
+                if vpn_state.get('state') == 'CLEANUP_FAILED' else 'Wartet' if vpn_requested else 'Aus')
+            service['/VPN/DNS'] = 'DNSmith erreichbar' if vpn_worker and vpn_state.get('dns_ready') else 'Nicht bereit'
+            service['/Security'] = 'AP nur lokal'
             state = snapshot()
             service['/Ethernet'] = role_text(state, 'ethernet')
             service['/WifiWan'] = role_text(state, 'wifi_wan')
@@ -130,6 +165,12 @@ def main():
     try:
         loop.run()
     finally:
+        if vpn_worker and vpn_worker.poll() is None:
+            (VPN_ROOT / 'stop').touch()
+            try:
+                vpn_worker.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                vpn_worker.kill()
         if worker and worker.poll() is None:
             (AP_ROOT / 'stop').touch()
             try:
