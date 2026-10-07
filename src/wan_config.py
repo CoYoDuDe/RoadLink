@@ -34,10 +34,20 @@ def station(profile, control):
                 control, ssid.encode().hex(), network)
 
 
-def dhcp_args(interface, hook):
+def client_name(value):
+    """Optional DHCP hostname: one ASCII DNS label, never shell/config text."""
+    if not isinstance(value, str) or (value and not re.fullmatch(
+            r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', value)):
+        raise ValueError('Use 1-63 letters, digits or internal hyphens; empty omits the name')
+    return value
+
+
+def dhcp_args(interface, hook, hostname=''):
     if interface != 'disabledrlwan' or str(hook) != '/data/RoadLink/src/wan_dhcp.py':
         raise ValueError('DHCP is restricted to the isolated USB station')
     # -C omits client ID, empty -V omits vendor class, -o replaces the default
-    # parameter list. Hostname/FQDN/user-class options are never supplied.
+    # parameter list. Only an explicitly chosen hostname is supplied.
+    hostname = client_name(hostname)
     return ['udhcpc', '-f', '-B', '-n', '-t', '3', '-T', '3', '-o', '-C', '-V', '',
-            '-O', '1', '-O', '3', '-O', '51', '-O', '54', '-i', interface, '-s', str(hook)]
+            '-O', '1', '-O', '3', '-O', '51', '-O', '54'] + (
+            ['-x', 'hostname:' + hostname] if hostname else []) + ['-i', interface, '-s', str(hook)]

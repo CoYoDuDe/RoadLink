@@ -36,5 +36,17 @@ MbPage {
         MbItemValue { description: qsTr("VPN-/DNS-Schutz"); item.bind: "com.coyodude.roadlink/Security" }
         MbItemValue { description: qsTr("VPN-Verbindung"); item.bind: "com.coyodude.roadlink/VPN/Status" }
         MbItemValue { description: qsTr("DNSmith"); item.bind: "com.coyodude.roadlink/VPN/DNS" }
+        MbEditBox {
+            description: qsTr("WLAN-Geraetename (optional)")
+            item.bind: "com.coyodude.roadlink/WifiWan/ClientName"
+            maximumLength: 63
+            overwriteMode: false
+            writeAccessLevel: User.AccessInstaller
+            function editTextToValue() {
+                return _editText === "" || /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(_editText) ? _editText : null
+            }
+        }
+        MbItemValue { description: qsTr("Geraetename speichern"); item.bind: "com.coyodude.roadlink/WifiWan/ClientNameStatus" }
+        MbItemText { text: qsTr("Leer: kein DHCP-Name. WLAN-Betreiber sehen trotzdem einen Teilnehmer.") }
     }
 }

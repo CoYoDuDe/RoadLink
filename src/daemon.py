@@ -29,6 +29,7 @@ from scan_api import install as install_scan_api
 from vpn_config import read as vpn_config
 from vpn_runtime import ROOT as VPN_ROOT
 from wan_runtime import ROOT as WAN_ROOT
+from wan_config import client_name
 
 
 def main():
@@ -39,11 +40,12 @@ def main():
         'ap_enabled': ['/Settings/RoadLink/AP/Enabled', 0, 0, 1],
         'ap_ssid': ['/Settings/RoadLink/AP/SSID', 'RoadLink', 0, 0],
         'wan_enabled': ['/Settings/RoadLink/WifiWan/Enabled', 0, 0, 1],
+        'client_name': ['/Settings/RoadLink/WifiWan/ClientName', '', 0, 0],
         'wan_mode': ['/Settings/RoadLink/Wan/Mode', 'AUTO', 0, 0],
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.12.2',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.13',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -52,6 +54,8 @@ def main():
         '/AP/PasswordStatus': 'Gesetzt' if AP_SECRET.exists() else 'Bitte festlegen',
         '/WifiWan/SSID': 'Nicht verbunden', '/WifiWan/State': 'Unbekannt',
         '/WifiWan/StateText': 'Nicht verbunden',
+        '/WifiWan/ClientNameStatus': ('Gesetzt; gilt fuer externe WLANs'
+                                    if settings['client_name'] else 'Leer: kein DHCP-Name'),
         '/Wan/Active': '', '/Wan/Reason': 'Noch nicht aktiv',
         '/Wan/Health': 'Noch nicht geprueft',
         '/Wan/Acceleration': 'Keine Buendelung aktiv',
@@ -71,6 +75,18 @@ def main():
 
     service.add_path('/AP/NewPassword', '', writeable=True,
                      onchangecallback=save_ap_password, itemtype=SecretItem)
+
+    def save_client_name(path, value):
+        try:
+            settings['client_name'] = client_name(value)
+        except (ValueError, TypeError, dbus.DBusException):
+            service['/WifiWan/ClientNameStatus'] = 'Fehler: 1-63 Buchstaben, Ziffern oder Bindestriche'
+            return False
+        service['/WifiWan/ClientNameStatus'] = 'Gespeichert; gilt bei der naechsten Verbindung'
+        return True
+
+    service.add_path('/WifiWan/ClientName', str(settings['client_name']), writeable=True,
+                     onchangecallback=save_client_name)
     install_profile_api(service)
     install_scan_api(service)
     service.register()
@@ -100,8 +116,10 @@ def main():
             vpn_current = repr(configuration) if vpn_requested else None
             profiles_path = Path('/data/setupOptions/RoadLink/wifi-profiles.json')
             wan_requested = bool(settings['wan_enabled'])
+            hostname = client_name(str(settings['client_name']))
+            service['/WifiWan/ClientName'] = hostname
             wan_current = (repr(configuration), profiles_path.stat().st_mtime_ns
-                           if profiles_path.exists() else 0) if wan_requested else None
+                           if profiles_path.exists() else 0, hostname) if wan_requested else None
             if wan_worker and wan_worker.poll() is not None:
                 wan_worker = None
                 wan_retry_at = time.monotonic() + 15
@@ -113,7 +131,7 @@ def main():
                     wan_signature = wan_current
                     wan_worker = subprocess.Popen([sys.executable,
                         str(Path(__file__).with_name('wan_runtime.py')), 'serve',
-                        str(os.getpid()), token(os.getpid())])
+                        str(os.getpid()), token(os.getpid()), hostname])
             if vpn_worker and vpn_worker.poll() is not None:
                 vpn_worker = None
                 vpn_retry_at = time.monotonic() + 15

@@ -14,7 +14,7 @@ from profiles import Profiles
 from privacy import profile_mac
 from wan_scan import Scanner
 from storage import atomic_write, load_json, write_json
-from wan_config import station, dhcp_args
+from wan_config import station, dhcp_args, client_name
 from wan_bridge import plan, rules, ipv6_rules
 from vpn_config import read as vpn_config
 import wan_bridge_runtime
@@ -187,7 +187,8 @@ def stop():
     raise RuntimeError('WAN cleanup incomplete; refusing package changes')
 
 
-def serve(parent_pid, parent_start):
+def serve(parent_pid, parent_start, hostname=''):
+    hostname = client_name(hostname)
     if os.geteuid() != 0: raise RuntimeError('Root required')
     lock = open('/run/roadlink-wan.lock', 'a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -318,7 +319,7 @@ def serve(parent_pid, parent_start):
                     raise RuntimeError('Unexpected additional radio interface')
             lease = load_json(ROOT / 'lease.json', {})
             if connected and dhcp is None:
-                dhcp = launch('dhcp', dhcp_args(RADIO, '/data/RoadLink/src/wan_dhcp.py'))
+                dhcp = launch('dhcp', dhcp_args(RADIO, '/data/RoadLink/src/wan_dhcp.py', hostname))
             leased = connected and dhcp and dhcp.poll() is None and lease.get('state') == 'LEASED'
             scanner.tick(bool(leased))
             write_json(ROOT / 'status.json', {'state': 'LEASED' if leased else 'ASSOCIATED' if connected else 'CONNECTING',
@@ -352,5 +353,5 @@ if __name__ == '__main__':
     if action == 'child': child(sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5:])
     elif action == 'guard': guard(int(sys.argv[2]), sys.argv[3], int(sys.argv[4]))
     elif action == 'stop': stop()
-    elif action == 'serve': serve(int(sys.argv[2]), sys.argv[3])
+    elif action == 'serve': serve(int(sys.argv[2]), sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else '')
     else: raise ValueError('Unknown WAN command')

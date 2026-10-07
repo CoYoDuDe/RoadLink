@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.12.2 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.13 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -27,6 +27,7 @@ Das Fahrzeug-WLAN heißt bei Neuinstallation **RoadLink**. Es gibt kein gemeinsa
 - Eigenes Fahrzeug-WLAN mit WPA2 und getrennten WLAN-Clients.
 - Externe WLANs suchen, hinzufügen, bearbeiten und entfernen; WPA2 oder offen.
 - Gespeicherte, freigegebene WLANs automatisch verbinden; Priorität selbst festlegen.
+- Optionalen Gerätenamen für externe WLANs einstellen; leer sendet keinen DHCP-Namen. Der Betreiber kann eine eigene Bezeichnung anzeigen. Der Fahrzeug-WLAN-Name ist unabhängig davon.
 - Ethernet/Starlink oder USB-WLAN für den verschlüsselten VPN-Tunnel wählen.
 - Aktives Netz, verbundenes WLAN und geprüften Internet-/DNS-Status im klassischen Venus-Menü sehen.
 - Automatische Umschaltung bei Ausfall mit verzögerter Rückkehr, damit die Verbindung nicht ständig wechselt.
