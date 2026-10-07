@@ -1,66 +1,60 @@
-# Network integration findings
+# RoadLink: Technik und Einrichtung
 
-## Passive discovery (v0.12)
+Diese Seite beschreibt den aktuellen Entwicklungsstand. Die kurze Bedienung steht in der [README](../README.md).
 
-The station worker owns a registered `scanner` child executing `iw ... scan passive` inside the same guarded namespace; its PID/start journal is separate from the scan-result JSON. Output is private, parsed into bounded SSID/security/signal/frequency metadata and removed on completion/cleanup. Busy/failing scans retry at most three times, each limited to 40 seconds, without blocking controller heartbeats. A requested scan during incomplete association pauses station/DHCP attempts, applies the current private MAC before link-up, then resumes association after completion. Active leases may scan without an explicit disconnect. A separate scan-only path supports initial discovery without saved profiles or VPN; no station/DHCP process starts, no host bridge is created without VPN, and namespace IPv4/IPv6 input/output/forwarding are dropped.
+## VPN einrichten
 
-The D-Bus API rejects overlapping requests, associates results with their request and guard generation, expires them after 180 seconds and never publishes raw BSSIDs/credentials. RSN/PSK/CCMP results are selectable; enterprise, SAE-only and legacy security are marked unsupported. Hidden/control/non-UTF-8 SSIDs are skipped; duplicates of the same SSID/security select the strongest AP. The owned vehicle-AP BSSID is excluded. Selecting a fresh result fills the standard profile draft and reuses matching stored profile identity/password; stale/unsupported selections clear the SSID and are refused. The GUI contains no shell commands. Live tests covered real passive discovery, profile selection without modifying stored credentials, controller death during a live registered scan and bootstrap with no profiles/VPN/IP traffic. Classic GUI scan, result list and selection into the editor were rendered and inspected. Remaining full-scope features are listed in the README.
+Der Server braucht WireGuard, einen registrierten Client-Schlüssel, Internetweiterleitung und einen DNS-Dienst im Tunnel. RoadLink richtet den Server derzeit nicht automatisch ein.
 
-## Active WAN transport (v0.10)
+Auf dem Venus-Gerät als root:
 
-The permanent USB worker creates an owned, down-first veth pair, installs host restrictions before raising it and explicitly sets/verifies the ownership alias: the Pi kernel ignored the alias supplied during veth creation. Its guard deletes the host link before removing its firewall. The VPN guard owns table 51910 and exact full-mask fwmark rule 21790; these survive WLAN-link deletion as an unreachable default until WireGuard itself is removed. Only an endpoint /32 route is selected. The ordinary host default remains unchanged. Private transit candidates are checked against existing root IPv4 routes, and DHCP rejects a transit/lease overlap. A nonzero global reverse-path filter is currently refused rather than changing native global settings.
+```sh
+/data/RoadLink/roadlink vpn-public-key
+```
 
-Namespace-local verified HTTPS to fixed 1.1.1.1:443 is an explicit health exception. It does not permit host HTTPS forwarding or general namespace output. Per-path HTTPS, tunnel DNS and tunnel HTTPS distinguish association from usable encrypted Internet. A peer is recreated on path change to discard its cached outer source address. Six GUI modes use the shared selector, failure/recovery thresholds and failback hysteresis. Two tunnel DNS failures temporarily exclude the current path. BEST_CONNECTION uses latency only; bandwidth, durable learning, captive-portal handling, automatic unknown-open association and acceleration are pending.
+Den ausgegebenen **öffentlichen** Schlüssel am eigenen Server registrieren. Der private Schlüssel bleibt auf dem Gerät. Anschließend die Platzhalter durch die eigenen Daten ersetzen:
 
-The earlier implementation records below describe their release boundaries; v0.10 replaces the earlier statements that permanent WLAN routing and WAN selection are inactive. Lifecycle and packet verification remain essential.
+```sh
+/data/RoadLink/roadlink configure-vpn --endpoint PUBLIC_IPV4 --server-key PUBLIC_KEY --address CLIENT_IPV4/32 --dns VPN_DNS --enable
+```
 
-## Interrupted setup recovery (v0.11)
+Als Serveradresse wird eine öffentliche IPv4-Adresse benötigt. Die Client-Adresse ist eine einzelne private IPv4-Adresse mit `/32`; DNS muss im Tunnel erreichbar sein. Keine fremden Zugangsdaten übernehmen.
 
-`owned_netns.py` registers a namespace-creator child before unshare. The controller opens its namespace descriptor, records nsfs identity and a same-filesystem private placeholder identity, then exclusively links the placeholder to the public namespace name and bind-mounts the descriptor there. Before mounting, the placeholder inode proves ownership; after mounting, nsfs identity does. A private random placeholder name is journalled before exclusive mode-0600 creation, covering interruption before its inode is saved. Successful mounting removes this temporary name. Cleanup refuses foreign/replaced identities. Namespace descriptors and bind mounts retain namespace lifetime as described in the [Linux namespace manual](https://man7.org/linux/man-pages/man7/namespaces.7.html).
+## Fahrzeug-WLAN
 
-The new veth initially has a journalled random peer name. If the host alias has not yet been set, cleanup requires both members down and unaliased, both of type veth, and reciprocal kernel iflink/ifindex values. After alias verification the peer receives its operational name and moves into the owned namespace. This covers the earlier veth alias window. Network commands from the station controller register a PID/start token before exec; the guard confirms controller death and stops these commands before cleanup, preventing a surviving setup command from racing restoration. Four targeted production-controller crash checkpoints verified full radio restoration, absence of owned mounts/links/rules and unchanged Ethernet/GPIO17. The namespace/veth journal windows described in the historical v0.9 notes are addressed by this release.
+Passwort verdeckt abfragen und den Standardnamen RoadLink setzen:
 
-Observed on a Raspberry Pi 4 running Venus OS v3.81, 2026-10-06.
+```sh
+/data/RoadLink/roadlink configure-ap
+```
 
-- Venus owns ConnMan 1.33, the system wpa_supplicant and a loopback-only dnsmasq 2.90. ConnMan stores profiles under `/data/var/lib/connman`.
-- The stock Raspberry Pi image lacked hostapd and its Venus service template. Official Venus packages hostapd 2.10 and wireguard-tools were installed for development. RoadLink runs a protected AP on its own ConnMan-excluded virtual interface and a guarded WireGuard tunnel to DNSmith. A WireGuard kernel module is already packaged.
-- Other Venus boards use `ap0`, a hostapd service template, and a dedicated AP configuration of the Venus dnsmasq package. `venus-platform` exposes AP controls only when the service template exists.
-- ConnMan excludes names beginning with `ap`, `disabled` and `ll`. This is relevant to single ownership of AP interfaces.
-- The internal brcmfmac radio supports AP mode. The external MT7612U/mt76x2u radio supports managed and AP modes with two transmit/receive chains. Its serial number is all zeroes and cannot identify a unique adapter; discovery falls back to its USB topology.
-- Local Ethernet is the recovery path. Its default gateway must not be removed merely to test wireless features.
+Ein eigener Name ist mit `--ssid NAME` möglich. Das Fahrzeug-WLAN anschließend im Menü aktivieren. Ein neues Passwort trennt bestehende WLAN-Clients. Ohne funktionsfähigen VPN-Tunnel bleibt das WLAN lokal.
 
-## Boundaries
+## Schutz und Wiederherstellung
 
-RoadLink must not start a second competing station/DHCP service on an interface already owned by Venus. Native AP primitives should be reused where available. Before enabling any external Wi-Fi association, verify that per-profile MAC, DHCP identity and IPv6/discovery restrictions can actually be enforced by the selected backend. Unsupported privacy controls must be reported, not claimed as active.
+Der interne Funkadapter stellt den WPA2/CCMP-Zugangspunkt bereit. Der ausgewählte USB-Adapter arbeitet allein in einem eigenen Linux-Netzwerkbereich (`roadlink-wan`). Vor dem Verbindungsaufbau werden IPv6 und unerlaubte IP-Verbindungen gesperrt. Private, pro Profil abgeleitete MAC-Adressen und reduzierte DHCP-Angaben vermeiden unnötige Geräteinformationen. Das ist keine Zusicherung von Unsichtbarkeit.
 
-Root-owned persistent configuration belongs outside the replaceable `/data/RoadLink` package directory. Runtime files belong under `/run`. Services and bounded logs use SetupHelper's service directory convention. Native menu files use FileSets/PatchSource and are reverse-patched at uninstall.
+Vom Host zum USB-Netz sind nur markierte WireGuard-Pakete zum konfigurierten Server erlaubt. Die unveränderte Ethernet-Standardroute dient weiter dem Gerätezugang. Fahrzeug-WLAN-Pakete dürfen ausschließlich durch WireGuard; unerreichbare Ersatzrouten und Firewall-Regeln verhindern einen unverschlüsselten Rückfall. Normales DNS wird zum Tunnel-DNS umgeleitet, Port 853 und private/reservierte Weiterleitungsziele werden gesperrt. Eine vollständige DoH-Filterung ist noch offen.
 
-## Recovery
+Die Tabellen 51890 (VPN-Prüfung), 51900 (Fahrzeug-WLAN) und 51910 (verschlüsselter WAN-Transport) sind getrennt. Der Transport nutzt Markierung `0x524c`. Netzlokale Gesundheitsprüfungen dürfen nur das feste HTTPS-Ziel `1.1.1.1:443` mit geprüftem TLS-Namen erreichen; sie verwenden kein externes DNS. Internetbereitschaft braucht zusätzlich einen aktuellen WireGuard-Handshake, Tunnel-DNS und HTTPS durch den Tunnel.
 
-`transactions.py` currently implements only durable, allowlisted file changes, confirmation deadlines and recovery after a changed boot ID. Concurrent edits are preserved as a conflict. It is not yet a complete network rollback implementation: process locking, an independent watchdog, runtime route/firewall/interface restoration and live reachability checks remain required.
+Unabhängige Wächter stoppen ausgefallene Prozesse und räumen nur nachgewiesene eigene Schnittstellen, Mounts und Regeln auf. Prozesskennungen enthalten den Startzeitpunkt; Netzwerkbereiche werden anhand ihrer Inode-/Gerätekennung geprüft. Fremde oder ersetzte Ressourcen werden nicht auf Verdacht entfernt. SetupHelper wartet vor Updates und Deinstallation auf die Bereinigung. Gezielte Abbruchtests decken auch die kurzen Fenster beim Erstellen von Netzwerkbereich und Verbindungspaar ab.
 
-## Current implementation limits
+## WLAN-Suche
 
-Hardware discovery, WAN selection policy, MAC derivation and a file journal exist. A DBus service, CLI, classic native GUI and isolated AP have passed install/uninstall/reinstall on the Pi. AP startup checks hostapd's ENABLED state before reporting availability. A separate guard owns cleanup and holds the runtime lock through cleanup; failed cleanup prevents a new AP or installation/removal. AP ingress uses table 51900, priority 21900, with a WireGuard default and unreachable fallback. Device VPN probes use table 51890, priority 21890. AP forwarding permits only valid AP-subnet traffic to WireGuard and established return traffic; source NAT uses the enrolled VPN client address. AP rules redirect ordinary DNS to DNSmith and block DoT and private/reserved routed destinations. Native management/default routes remain unchanged. AP guard cleanup removes the AP interface before its routing and rules. VPN cleanup removes WireGuard; the AP unreachable route and drops remain. VPN FORWARD drops exclude the AP pair because the AP controller owns its constrained rules, preserving those rules across VPN restarts. IPv6 remains blocked. Arbitrary DoH filtering, external-WLAN identity enforcement, WAN switching, captive portal assistant, client manager, web UI and GUI v2 integration remain pending. Passing local policy tests does not verify any live security property.
+Die passive Suche läuft in einem separat registrierten Prozess mit höchstens drei Versuchen von jeweils 40 Sekunden. Der Controller bleibt währenddessen überwacht. Rohdaten werden privat gespeichert und danach entfernt. Die Oberfläche erhält nur WLAN-Name, unterstützte Verschlüsselung, Signalstärke und Frequenz; keine Passwörter oder rohen BSSIDs. Ergebnisse gelten drei Minuten. Die Auswahl füllt zunächst nur das Formular; sie verbindet noch kein Netz.
 
-References: [SetupHelper guidelines](https://github.com/kwindrem/SetupHelper/blob/main/PackageDevelopmentGuidelines.md), [Venus platform](https://github.com/victronenergy/venus-platform), [Venus package recipes](https://github.com/victronenergy/meta-victronenergy).
+Der Suchbetrieb ist auch ohne gespeicherte Profile oder VPN möglich. Dann gibt es keine IP-Adresse, keinen DHCP-Prozess und keine Host-Verbindung. Ohne VPN bleibt die automatische Verbindung gesperrt.
 
-## v0.8 packet verification
+## Diagnose
 
-A disposable Linux namespace client exercised the production AP routing/firewall builders on a separate veth ingress and reserved test table. Its redirected DNS and verified HTTPS worked through the VPN with the server public address. Private-network and DoT probes failed. Removing the VPN default left the unreachable fallback; deliberately removing the test policy also failed because the AP base drop caught Ethernet-bound traffic. The test namespace, rules, interface and table were removed, and the native Ethernet default remained unchanged. This verifies routed packets, not wireless radio performance or phone connectivity. Production lifecycle/crash and SetupHelper verification are recorded separately in device diagnostics. Tests are kept outside the package/repository.
+```sh
+/data/RoadLink/roadlink status
+/data/RoadLink/roadlink vpn-status
+/data/RoadLink/roadlink ap-status
+/data/RoadLink/roadlink diagnostics
+```
 
-## USB-WAN backend verification
+`vpn-disable` schaltet den Tunnel aus. `safe-mode` schaltet das Fahrzeug-WLAN aus; Ethernet bleibt verfügbar. Statusdateien liegen unter `/run/roadlink-*`, private Einstellungen unter `/data/setupOptions/RoadLink` und das Dienstlog unter `/var/log/com.coyodude.roadlink/current`. Zugangsdaten und private Schlüssel nicht veröffentlichen.
 
-Real MT7612U PHY namespace move/return and private MAC changes work on this Pi. Rename to a ConnMan-excluded `disabled*` name while down, then wait for native supplicant release before moving the PHY. Never start a competing station stack. Disable IPv6 before raising the interface. A controlled test with the authorized Kasse WLAN verified saved-profile MAC authentication, minimal DHCP DISCOVER/REQUEST wire options and namespace-only lease/routes, then HTTPS. Native Ethernet, AP/VPN and original USB state survived restoration; native supplicant subsequently owned wlan0/wlan1 again. The permanent backend still needs a journal, independent guard, hotplug handling, endpoint-only veth routing and WAN health/selection integration. A successful temporary trial is not proof of permanent recovery or failover.
-
-## Endpoint-only WLAN bridge (v0.8.2)
-
-`wan_bridge.py` builds scoped IPv4/IPv6 firewall rules without changing the live network. Host-to-namespace traffic permits only mark `0x524c`, the chosen public WireGuard endpoint/UDP port, and the private transit host address. Host forwarding through this link is always dropped. The exclusively owned WAN namespace permits only that forwarded endpoint flow, established replies, DHCP and loopback; it applies narrowly scoped masquerading. All IPv6 is dropped. There is no host DNS, discovery, HTTP, or general namespace Internet output allowance.
-
-Real kernel tests in three disposable namespaces verified marked UDP and NAT, DHCP replies, and drops for unmarked traffic, wrong ports/sources, TCP, local namespace UDP and IPv6 using firewall counters. The Pi's main Ethernet route and production AP/VPN remained unchanged. This is a tested building block, not an active USB-WLAN controller. The permanent journal/guard, exclusive USB ownership, endpoint routing with unreachable fallback and WAN health/failover integration are still pending. The controller must install drops before interfaces come up and remove its link before rules; these builders alone do not perform those lifecycle steps. Test files stay outside the repository/package.
-
-## Permanent station worker (v0.9)
-
-`wan_runtime.py` owns the USB PHY under `roadlink-wan`, with an independent cleanup guard, runtime flock, controller/child PID start tokens and a private state journal. It refuses an already-connected native station, ambiguous hardware, an existing namespace/interface or incomplete prior cleanup. Rename to `disabledrlwan` and native supplicant release precede namespace ownership; IPv6 and namespace firewall drops precede association/DHCP. The guard kills a stalled/dead-owner controller before undoing changes. If the guard dies, the live controller stops its children and restores the radio itself. A foreign namespace inode or unexpected radio identity prevents destructive cleanup. Unplugged hardware is not replaced by name during cleanup. One setup mutation window between namespace creation and journaling its inode can leave cleanup refused after a precisely timed kill; this retained namespace requires ownership inspection rather than deletion by guess. Hardening that window remains pending.
-
-The daemon retries after successful cleanup and observes enabled settings, private profile changes and safe mode. Runtime status overrides native discovery while the USB PHY is inside the namespace. The GUI distinguishes an associated WLAN reserve from the active Ethernet/VPN path. There is no veth link into the host yet, so association is not reported as routed Internet or failover. Tests remain outside the package.
+Die Anpassungen verwenden [SetupHelper](https://github.com/kwindrem/SetupHelper) und seine [Paketregeln](https://github.com/kwindrem/SetupHelper/blob/main/PackageDevelopmentGuidelines.md). Gemeinsame HelperResources werden nicht verändert. Für eigene QML-Dateien bleibt die NO_ORIG-Markierung erhalten; nur inhaltsgenau nachgewiesene alte RoadLink-Kopien werden nach privater Sicherung repariert. Tests bleiben außerhalb des Pakets.

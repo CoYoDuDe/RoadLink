@@ -1,41 +1,57 @@
 # RoadLink
 
-Venus OS networking addon using kwindrem SetupHelper. **Development release v0.12: passive WLAN discovery and profile selection, guarded Ethernet/USB-WLAN selection and vehicle AP Internet through WireGuard.**
+Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
+**Entwicklungsstand v0.12.1 – noch keine fertige Endversion.**
 
-Settings → RoadLink → WLANs suchen starts a passive USB-radio search and shows reachable SSIDs, signal strength and supported security. Select a result to prefill the existing profile editor; existing matching profiles retain their identity, priority and password. No network is joined merely by scanning or selecting it. Results expire after three minutes; unsupported security and hidden/non-UTF-8 names are not selectable. The vehicle AP's own BSSID is excluded. Scans run in a registered independent child with bounded retry/timeout while the controller continues its heartbeat. If association is not ready, the requested search temporarily pauses connection attempts and resumes them afterward. Scan-only bootstrap works without profiles or VPN: the private-MAC USB radio has no IP address/DHCP and all namespace IP traffic is dropped. Saved autoconnect networks still require enabled VPN configuration. Scanning can temporarily affect radio availability; encrypted Internet protection and native Ethernet management remain in force.
+## Installation
 
-v0.11 hardens interrupted setup: namespace identity is journalled before its named mount becomes visible, and a down veth pair has a private temporary peer identity before its alias is assigned. The guard stops registered command processes as well as station/DHCP children before restoration. Targeted live crash checks cover temporary-file creation, name publication, namespace mounting and veth creation; each restored the USB radio and removed owned interfaces, mounts and firewall rules.
+[SetupHelper von kwindrem](https://github.com/kwindrem/SetupHelper) installieren. Im Paketmanager eintragen:
 
-The USB reserve now carries the encrypted tunnel through an endpoint-only private link. The GUI offers AUTO, PREFER_STARLINK, PREFER_WIFI, BEST_CONNECTION, STARLINK_ONLY and WIFI_ONLY and shows the selected path, connected WLAN and readiness. Each path has a bound, certificate-verified HTTPS check; tunnel readiness additionally requires DNS, HTTPS and a recent WireGuard handshake. Failed tunnel DNS temporarily excludes a path so AUTO can try the reserve. Selection uses hysteresis to avoid rapid switching. BEST_CONNECTION currently compares probe latency; bandwidth measurement, durable learned ranking and bonding/acceleration remain pending.
+- Paket: `RoadLink`
+- GitHub-Benutzer: `CoYoDuDe`
+- Branch: `main`
 
-Marked WireGuard packets use table 51910 (priority 21790), with only the chosen endpoint route and an unreachable fallback. The host/WLAN link accepts only this marked encrypted UDP flow. Namespace-local health probes may reach only 1.1.1.1:443 using a fixed TLS name; no WAN DNS is needed. Native Ethernet management retains its original default route. WLAN operators can still observe a connected station and its traffic; per-profile MAC and minimal DHCP identity do not make it invisible.
+Danach **Einstellungen → RoadLink** öffnen. Benötigt werden die Venus-Pakete `hostapd`, `dnsmasq` und WireGuard. Fehlende Abhängigkeiten werden derzeit noch nicht automatisch installiert.
 
-`roadlink vpn-public-key` generates or reuses a WireGuard key locally on the device and prints only its public key. The private key remains mode 0600 outside the package; a lock prevents concurrent provisioning from replacing it. This command does not activate a tunnel or change routes. DNSmith can register this public key without receiving the client's private key.
+## Erste Einrichtung
 
-The separate VPN controller can be provisioned locally with `roadlink configure-vpn --endpoint PUBLIC_IPV4 --server-key PUBLIC_KEY --address CLIENT_IPV4/32 --dns VPN_DNS --enable`. Settings remain private outside the package; endpoint bootstrap uses a supplied public IPv4 address without an external DNS lookup. Device probes explicitly sourced from the VPN address use a dedicated routing table. Vehicle-AP ingress uses a separate table and policy rule. Its unreachable fallback and source/interface firewall prevent that traffic from falling back to native Ethernet. Native management/default routes remain unchanged. IPv6 remains blocked on the AP and VPN interfaces. AP traffic can use only the owned WireGuard interface; its private subnet is translated to the enrolled client VPN address. `roadlink vpn-disable` stops it reversibly; `roadlink vpn-status` shows its state. READY means a recent handshake, DNS and verified HTTPS through the tunnel. AP Internet availability is reported separately; native Pi management traffic keeps its original routes.
+1. VPN mit einem eigenen Server einrichten; Anleitung unter [Technik und Einrichtung](docs/ARCHITECTURE.md).
+2. Für das Fahrzeug-WLAN ein eigenes Passwort festlegen und es einschalten.
+3. Mit einem passenden USB-WLAN-Stick **WLANs suchen**, ein Netz auswählen und speichern.
+4. Automatische Verbindung im gewünschten WLAN-Profil freigeben und die USB-WLAN-Reserve einschalten.
 
-An independent VPN guard retains the controller lock, kills a stalled controller before cleanup and removes its owned interface, policy route and IPv4/IPv6 rules. The status service retries after cleanup with a delay. SetupHelper waits for both AP and VPN cleanup before installation/removal. VPN settings and local keys survive uninstall/reinstall. Native GUI status shows tunnel/DNS readiness and whether the vehicle WLAN has VPN Internet or remains local-only.
+Das Fahrzeug-WLAN heißt bei Neuinstallation **RoadLink**. Es gibt kein gemeinsames Standardpasswort und keine vorgegebenen externen WLANs oder Serverzugänge. WLAN und USB-Reserve starten ausgeschaltet; der Verbindungsmodus ist `AUTO`. Bestehende Einstellungen bleiben bei Updates erhalten.
 
-The native GUI at Settings → RoadLink shows the default WAN interface, connected USB WLAN and explicit Internet/failover/protection limits. Its vehicle-WLAN page controls the AP and its SSID and shows its local address. `/data/RoadLink/roadlink status`, `hardware` and `diagnostics` provide diagnostics.
+## Was bereits funktioniert
 
-The internal-radio AP uses WPA2/CCMP, isolated clients and a private non-overlapping subnet. Configure its password locally with `roadlink configure-ap` (hidden prompt) or `roadlink configure-ap --generate`. Credentials stay in a root-only file outside the package. The default temporary SSID is `breschdleng-roadlink` to avoid confusion while Starlink broadcasts a similar name. Without an enabled VPN configuration the AP remains local-only. With guarded routing active and the tunnel ready, DHCP advertises the AP gateway and VPN DNS server. Local-only leases last one minute to allow renewal when VPN becomes ready. AP forwarding permits only its private source subnet through WireGuard and established return traffic. Separate unreachable routes plus AP drop rules prevent Ethernet fallback. UDP/TCP port 53 is redirected to DNSmith; port 853 and private/reserved routed destinations are blocked. Arbitrary HTTPS-based DNS (DoH) is not filtered yet, so complete DNS-provider enforcement is still pending. IPv6 forwarding remains blocked. Official Venus `hostapd` and `dnsmasq`, including `hostapd_cli`, must be installed for this development release; setup does not yet provision missing dependencies.
+- Eigenes Fahrzeug-WLAN mit WPA2 und getrennten WLAN-Clients.
+- Externe WLANs suchen, hinzufügen, bearbeiten und entfernen; WPA2 oder offen.
+- Gespeicherte, freigegebene WLANs automatisch verbinden; Priorität selbst festlegen.
+- Ethernet/Starlink oder USB-WLAN für den verschlüsselten VPN-Tunnel wählen.
+- Aktives Netz, verbundenes WLAN und geprüften Internet-/DNS-Status im klassischen Venus-Menü sehen.
+- Automatische Umschaltung bei Ausfall mit verzögerter Rückkehr, damit die Verbindung nicht ständig wechselt.
 
-SetupHelper package: `RoadLink`, GitHub user `CoYoDuDe`, branch `main`. Setup installs a bounded-log status service and patches the native GUI menu. Uninstall removes the service and its own menu entry, preserving other addon menus. Classic GUI/Remote Console is supported; GUI v2 integration is not implemented yet.
+**Das Fahrzeug-WLAN erhält Internet nur über den geprüften VPN-Tunnel.** Eine WLAN-Verbindung oder IP-Adresse allein reicht nicht. Ethernet und SSH für den Gerätezugang bleiben erhalten. WLAN-Betreiber können weiterhin einen verbundenen Teilnehmer erkennen; RoadLink macht ihn nicht unsichtbar.
 
-The active station controller uses stable per-profile MAC derivation and an independent cleanup guard. Durable file-change journals also exist; file rollback alone does not provide network recovery.
+## Verbindungsmodi
 
-An independent AP guard kills a stalled mutating controller, then cleans up owned processes, interface, routing, NAT and firewall rules. It restores IPv4 forwarding to its prior disabled value when RoadLink enabled it; an already enabled value is preserved. AP startup refuses an occupied routing table/priority. Failed controllers retry after cleanup with a delay. Setup waits for this cleanup before installation/removal. `roadlink safe-mode` disables AP activation while preserving Ethernet. This AP-specific guard is not yet full WAN recovery.
+| Modus | Verhalten |
+|---|---|
+| AUTO | Ethernet bevorzugen, bei Ausfall geeignetes WLAN nutzen |
+| PREFER_STARLINK | Ethernet/Starlink bevorzugen |
+| PREFER_WIFI | Geeignetes WLAN bevorzugen |
+| BEST_CONNECTION | Aktuell die Antwortzeit vergleichen |
+| STARLINK_ONLY | Nur Ethernet/Starlink verwenden |
+| WIFI_ONLY | Nur USB-WLAN verwenden |
 
-The vehicle-WLAN page includes masked password entry (8–63 printable ASCII characters). Saving restarts the vehicle AP and disconnects its clients. The write-only password BusItem never publishes its submitted value through GetValue, GetItems or change signals; only a result status is exposed. The existing password is never shown. Native Ethernet settings remain available for recovery. Native Wi-Fi settings remain available for the native radios; RoadLink temporarily owns only its selected USB radio while the reserve is enabled.
+## Noch offen
 
-External-WLAN profiles can be added by SSID, listed and forgotten in RoadLink's native GUI. Profiles include WPA2/CCMP or open security, priority 0–100 and the intended autoconnect setting. Resaving the same SSID/security updates it; leaving the password blank preserves an existing password. Enter the password after selecting the SSID/security, then save within 60 seconds. Password inputs stay write-only and expire from memory. Profiles persist privately outside the package, with a stable derived MAC assigned per profile and VPN required. Autoconnect-enabled saved profiles are used by the guarded USB station controller; vehicle Internet still requires the encrypted tunnel. CLI commands `wifi-list`, `wifi-save --ssid NAME` and `wifi-forget --id ID` use the same store; passwords use a hidden prompt.
+Automatische Auswahl unbekannter offener Netze, WLAN-Anmeldeseiten, Geschwindigkeitsmessung und gelerntes Ranking, echte Bündelung/Beschleunigung, Handy-Import, Clientverwaltung sowie Weboberfläche/GUI v2. HTTPS-basierte Fremd-DNS-Dienste werden noch nicht vollständig gefiltert. Die aktuelle Oberfläche unterstützt das klassische Venus-GUI und die Remote Console.
 
-Setup preserves SetupHelper's NO_ORIG marker when updating RoadLink-only QML files. A bounded migration archives and repairs only originals whose SHA256 exactly matches known earlier RoadLink sources; unknown originals remain untouched. This avoids restoring obsolete RoadLink search pages after uninstall without changing shared HelperResources.
+## Updates und Entfernen
 
-The saved-WLAN list includes a new-profile entry. Open a profile and select Edit to load its SSID/security/priority/autoconnect settings. Saving edits preserves its identity and private MAC when renaming; leaving the password field untouched retains the existing password. Duplicate SSID/security combinations are rejected. Larger priority values appear first. Measured automatic ranking and phone import/export are not implemented yet.
+Updates und Deinstallation laufen über SetupHelper. Eigene Zugangsdaten und Schlüssel liegen ausschließlich lokal unter `/data/setupOptions/RoadLink`, außerhalb des Pakets. Nach einer Deinstallation bleiben sie für eine spätere Neuinstallation erhalten. Tests sind kein Bestandteil des veröffentlichten Pakets.
 
-Pending: measured bandwidth and learned ranking, portable import/export, captive portals, client management and complete UI. Saved authorized profiles autoconnect, and Ethernet/WLAN selection is active. No bandwidth bonding is active. Never interpret link carrier or the default route as a successful Internet/security check.
+## Unterstützung
 
-Tests stay outside this repository and device packages. See `docs/ARCHITECTURE.md` for integration constraints.
-
-Earlier isolated backend and packet tests established the minimal DHCP and endpoint-only firewall primitives. The permanent worker now records ownership, uses an independent guard, restores the USB radio on cleanup and routes the selected encrypted tunnel through its private link. Unknown open networks are not automatically joined; only saved profiles enabled for autoconnect are candidates. See the architecture notes for remaining ownership hardening limits.
+Die Pakete sind kostenlos. Freiwillige Unterstützung: [PayPal](https://paypal.me/CoYoDuDe), [Buy Me a Coffee](https://www.buymeacoffee.com/CoYoDuDe), [weitere Projekte](https://dnsmith.net/). Kein Abo-Zwang.

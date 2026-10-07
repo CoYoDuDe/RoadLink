@@ -14,12 +14,12 @@ from storage import load_json, write_json
 from ap_config import hostapd
 from profiles import Profiles
 
-parser = argparse.ArgumentParser(description='RoadLink network diagnostics')
+parser = argparse.ArgumentParser(description='RoadLink: Netzwerk prüfen und einrichten')
 parser.add_argument('command', choices=['status', 'hardware', 'diagnostics', 'configure-ap', 'ap-status', 'safe-mode',
                                       'wifi-list', 'wifi-save', 'wifi-forget', 'vpn-public-key',
                                       'configure-vpn', 'vpn-disable', 'vpn-status'])
-parser.add_argument('--ssid', default='breschdleng-roadlink')
-parser.add_argument('--generate', action='store_true', help='Generate a private AP password on this device')
+parser.add_argument('--ssid', default='RoadLink')
+parser.add_argument('--generate', action='store_true', help='Eigenes WLAN-Passwort auf diesem Gerät erzeugen')
 parser.add_argument('--security', choices=['psk', 'open'], default='psk')
 parser.add_argument('--priority', type=int, default=50)
 parser.add_argument('--autoconnect', action='store_true')
@@ -36,24 +36,24 @@ if args.command == 'vpn-status':
     sys.exit(0)
 if args.command in ('configure-vpn', 'vpn-disable'):
     if os.geteuid() != 0:
-        parser.error('Root required')
+        parser.error('Root-Rechte erforderlich')
     from vpn_config import read, save
     if args.command == 'vpn-disable':
         value = read()
         if value:
             save(dict(value, enabled=False))
-        print('VPN disable requested; native management route remains unchanged.')
+        print('VPN wird ausgeschaltet. Der normale Gerätezugang bleibt erhalten.')
     else:
         if not all((args.endpoint, args.server_key, args.address, args.dns)):
-            parser.error('--endpoint, --server-key, --address and --dns are required')
+            parser.error('--endpoint, --server-key, --address und --dns sind erforderlich')
         from wireguard import ensure_public_key
         ensure_public_key()
         try:
             save({'enabled': args.enable, 'endpoint': args.endpoint, 'public_key': args.server_key,
                   'address': args.address, 'dns': args.dns, 'port': args.port})
         except (ValueError, KeyError):
-            parser.error('Invalid VPN configuration')
-        print('VPN configuration saved. The vehicle AP uses VPN Internet when guarded routing and tunnel/DNS are ready.')
+            parser.error('Ungültige VPN-Konfiguration')
+        print('VPN gespeichert. Das Fahrzeug-WLAN erhält Internet, sobald Tunnel und DNS geprüft sind.')
     sys.exit(0)
 if args.command == 'vpn-public-key':
     from wireguard import ensure_public_key
@@ -61,45 +61,45 @@ if args.command == 'vpn-public-key':
     sys.exit(0)
 if args.command.startswith('wifi-'):
     if os.geteuid() != 0:
-        parser.error('Root required')
+        parser.error('Root-Rechte erforderlich')
     profiles = Profiles()
     if args.command == 'wifi-save':
         # An explicit SSID is required; the AP default must never become an
         # unintended external WLAN profile.
         if '--ssid' not in sys.argv:
-            parser.error('--ssid is required')
+            parser.error('--ssid ist erforderlich')
         password = getpass.getpass('Externes WLAN-Passwort (leer: bisheriges behalten): ') if args.security == 'psk' else ''
         try:
             identifier = profiles.save(args.ssid, args.security, password, args.priority, args.autoconnect)
         except ValueError as error:
             parser.error(str(error))
-        print('Profile saved: ' + identifier + '. Connection awaits the protected WAN controller.')
+        print('WLAN gespeichert: ' + identifier + '. Automatische Verbindung nur bei entsprechender Freigabe.')
     elif args.command == 'wifi-forget':
         if not args.profile_id:
-            parser.error('--id is required')
+            parser.error('--id ist erforderlich')
         profiles.forget(args.profile_id)
-        print('Profile removed.')
+        print('WLAN entfernt.')
     else:
         print(json.dumps(profiles.metadata(), ensure_ascii=False, indent=2))
     sys.exit(0)
 if args.command == 'configure-ap':
     if os.geteuid() != 0:
-        parser.error('Root required')
+        parser.error('Root-Rechte erforderlich')
     password = secrets.token_urlsafe(18) if args.generate else getpass.getpass('Fahrzeug-WLAN-Passwort: ')
     hostapd('aproadlink', args.ssid, password)
     write_json('/data/setupOptions/RoadLink/ap-secret.json', {'password': password})
     import dbus
     obj = dbus.SystemBus().get_object('com.victronenergy.settings', '/Settings/RoadLink/AP/SSID')
     dbus.Interface(obj, 'com.victronenergy.BusItem').SetValue(dbus.String(args.ssid))
-    print('AP password saved privately; SSID set. Enable through RoadLink GUI.')
+    print('WLAN-Name und Passwort lokal gespeichert. Fahrzeug-WLAN im RoadLink-Menü einschalten.')
     sys.exit(0)
 if args.command == 'safe-mode':
     if os.geteuid() != 0:
-        parser.error('Root required')
+        parser.error('Root-Rechte erforderlich')
     path = Path('/data/setupOptions/RoadLink/SAFE_MODE')
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch(mode=0o600)
-    print('Safe mode requested; RoadLink AP will stop. Native Ethernet remains unchanged.')
+    print('Sicherheitsmodus aktiviert: Fahrzeug-WLAN wird ausgeschaltet. Ethernet bleibt erhalten.')
     sys.exit(0)
 if args.command == 'ap-status':
     state = load_json('/run/roadlink-ap/status.json', {'state': 'OFF'})

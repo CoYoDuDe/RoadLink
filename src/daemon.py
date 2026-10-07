@@ -37,13 +37,13 @@ def main():
     bus = dbus.SystemBus()
     settings = SettingsDevice(bus, {
         'ap_enabled': ['/Settings/RoadLink/AP/Enabled', 0, 0, 1],
-        'ap_ssid': ['/Settings/RoadLink/AP/SSID', 'breschdleng-roadlink', 0, 0],
+        'ap_ssid': ['/Settings/RoadLink/AP/SSID', 'RoadLink', 0, 0],
         'wan_enabled': ['/Settings/RoadLink/WifiWan/Enabled', 0, 0, 1],
         'wan_mode': ['/Settings/RoadLink/Wan/Mode', 'AUTO', 0, 0],
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.12',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.12.1',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
