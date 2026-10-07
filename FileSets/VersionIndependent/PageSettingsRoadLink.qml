@@ -46,7 +46,8 @@ MbPage {
                 return _editText === "" || /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(_editText) ? _editText : null
             }
         }
-        MbItemValue { description: qsTr("Geraetename speichern"); item.bind: "com.coyodude.roadlink/WifiWan/ClientNameStatus" }
-        MbItemText { text: qsTr("Leer: kein DHCP-Name. WLAN-Betreiber sehen trotzdem einen Teilnehmer.") }
+        MbItemValue { description: qsTr("Namestatus"); item.bind: "com.coyodude.roadlink/WifiWan/ClientNameStatus" }
+        MbItemText { text: qsTr("Leer: kein DHCP-Name") }
+        MbItemText { text: qsTr("1-63 Buchstaben, Ziffern oder Bindestriche") }
     }
 }

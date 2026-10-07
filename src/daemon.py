@@ -45,7 +45,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.13',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.13.1',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -54,7 +54,7 @@ def main():
         '/AP/PasswordStatus': 'Gesetzt' if AP_SECRET.exists() else 'Bitte festlegen',
         '/WifiWan/SSID': 'Nicht verbunden', '/WifiWan/State': 'Unbekannt',
         '/WifiWan/StateText': 'Nicht verbunden',
-        '/WifiWan/ClientNameStatus': ('Gesetzt; gilt fuer externe WLANs'
+        '/WifiWan/ClientNameStatus': ('Gesetzt'
                                     if settings['client_name'] else 'Leer: kein DHCP-Name'),
         '/Wan/Active': '', '/Wan/Reason': 'Noch nicht aktiv',
         '/Wan/Health': 'Noch nicht geprueft',
@@ -80,9 +80,9 @@ def main():
         try:
             settings['client_name'] = client_name(value)
         except (ValueError, TypeError, dbus.DBusException):
-            service['/WifiWan/ClientNameStatus'] = 'Fehler: 1-63 Buchstaben, Ziffern oder Bindestriche'
+            service['/WifiWan/ClientNameStatus'] = 'Fehler: Name ungueltig'
             return False
-        service['/WifiWan/ClientNameStatus'] = 'Gespeichert; gilt bei der naechsten Verbindung'
+        service['/WifiWan/ClientNameStatus'] = 'Gespeichert'
         return True
 
     service.add_path('/WifiWan/ClientName', str(settings['client_name']), writeable=True,
