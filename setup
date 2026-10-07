@@ -26,6 +26,10 @@ if [ "$scriptAction" = 'INSTALL' ] || [ "$scriptAction" = 'UNINSTALL' ]; then
         logMessage 'RoadLink AP cleanup failed; leaving installed files intact'
         exit 245
     fi
+    if [ -f "$scriptDir/src/wan_runtime.py" ] && ! python3 "$scriptDir/src/wan_runtime.py" stop; then
+        logMessage 'RoadLink WAN cleanup failed; leaving installed files intact'
+        exit 245
+    fi
     if ! python3 "$scriptDir/src/vpn_runtime.py" stop; then
         logMessage 'RoadLink VPN cleanup failed; leaving installed files intact'
         exit 245

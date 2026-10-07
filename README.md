@@ -33,3 +33,9 @@ The next USB-WAN backend has validated station/DHCP primitives (`wan_config.py`,
 ### v0.8.2: endpoint-only uplink rules
 
 A tested firewall-plan module restricts the future USB-WLAN namespace link to marked WireGuard UDP to its configured public endpoint. Real isolated kernel tests cover NAT, DHCP, traffic restrictions and IPv6 drops. This release does not yet activate permanent USB autoconnect or WAN switching; those still require the guarded ownership controller and routing integration. Native Ethernet management remains unchanged.
+
+### v0.9: guarded USB-WLAN reserve
+
+The native GUI can enable the USB-WLAN reserve and show its actual connected SSID and connection state. A dedicated station worker uses saved profiles with autoconnect enabled, ordered by priority. It releases native station ownership, uses each profile's private MAC before association, disables IPv6, and acquires DHCP only inside its own network namespace. A separate watchdog records processes before exec and restores the original USB interface name/MAC/IPv6/up state on shutdown or controller failure. Installation/removal waits for verified cleanup; unsafe or ambiguous ownership is refused. Private runtime credentials are removed during successful cleanup.
+
+The reserve is connected in isolation; the VPN still uses the existing host path. This release does not yet activate WAN failover, health-based ranking, captive-portal handling or acceleration. The endpoint-only veth and marked WireGuard route integration remain pending. Unknown open networks are not automatically joined: only saved profiles explicitly enabled for autoconnect are candidates. Invisibility to a WLAN operator is not promised.

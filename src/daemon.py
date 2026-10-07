@@ -27,6 +27,7 @@ from wifi import networks
 from profile_api import install as install_profile_api
 from vpn_config import read as vpn_config
 from vpn_runtime import ROOT as VPN_ROOT
+from wan_runtime import ROOT as WAN_ROOT
 
 
 def main():
@@ -36,10 +37,11 @@ def main():
     settings = SettingsDevice(bus, {
         'ap_enabled': ['/Settings/RoadLink/AP/Enabled', 0, 0, 1],
         'ap_ssid': ['/Settings/RoadLink/AP/SSID', 'breschdleng-roadlink', 0, 0],
+        'wan_enabled': ['/Settings/RoadLink/WifiWan/Enabled', 0, 0, 1],
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.8.2',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.9',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -47,6 +49,7 @@ def main():
         '/AP/Status': 'Aus', '/AP/Address': '',
         '/AP/PasswordStatus': 'Gesetzt' if AP_SECRET.exists() else 'Bitte festlegen',
         '/WifiWan/SSID': 'Nicht verbunden', '/WifiWan/State': 'Unbekannt',
+        '/WifiWan/StateText': 'Nicht verbunden',
         '/Wan/Active': '', '/Wan/Reason': 'Noch nicht aktiv',
         '/Wan/Health': 'Noch nicht geprueft',
         '/Wan/Acceleration': 'Keine Buendelung aktiv',
@@ -75,9 +78,13 @@ def main():
     vpn_signature = None
     vpn_retry_at = 0
     ap_retry_at = 0
+    wan_worker = None
+    wan_signature = None
+    wan_retry_at = 0
 
     def refresh():
         nonlocal worker, signature, failed, vpn_worker, vpn_signature, vpn_retry_at, ap_retry_at
+        nonlocal wan_worker, wan_signature, wan_retry_at
         try:
             import time
             vpn_invalid = False
@@ -88,6 +95,22 @@ def main():
             vpn_requested = bool(configuration and configuration['enabled']
                 and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists())
             vpn_current = repr(configuration) if vpn_requested else None
+            profiles_path = Path('/data/setupOptions/RoadLink/wifi-profiles.json')
+            wan_requested = bool(settings['wan_enabled'] and vpn_requested)
+            wan_current = (repr(configuration), profiles_path.stat().st_mtime_ns
+                           if profiles_path.exists() else 0) if wan_requested else None
+            if wan_worker and wan_worker.poll() is not None:
+                wan_worker = None
+                wan_retry_at = time.monotonic() + 15
+            if wan_worker and wan_current != wan_signature:
+                (WAN_ROOT / 'stop').touch()
+            elif (not wan_worker and wan_requested and time.monotonic() >= wan_retry_at
+                  and not alive(load_json(WAN_ROOT / 'guard.json', {}))):
+                if load_json(WAN_ROOT / 'result.json', {'cleaned': True}).get('cleaned'):
+                    wan_signature = wan_current
+                    wan_worker = subprocess.Popen([sys.executable,
+                        str(Path(__file__).with_name('wan_runtime.py')), 'serve',
+                        str(os.getpid()), token(os.getpid())])
             if vpn_worker and vpn_worker.poll() is not None:
                 vpn_worker = None
                 vpn_retry_at = time.monotonic() + 15
@@ -131,6 +154,23 @@ def main():
             else:
                 service['/WifiWan/SSID'] = 'Nicht verfuegbar'
                 service['/WifiWan/State'] = 'missing' if not radios else 'ambiguous'
+            wan_state = load_json(WAN_ROOT / 'status.json', {})
+            if wan_worker and alive(load_json(WAN_ROOT / 'guard.json', {})):
+                service['/WifiWan'] = 'Isolierter USB-Stick (' + wan_state.get('driver', 'startet') + ')'
+                service['/WifiWan/SSID'] = wan_state.get('ssid') or 'Verbindet bekanntes WLAN'
+                service['/WifiWan/State'] = wan_state.get('state', 'STARTING')
+                service['/Wan/Reason'] = ('WLAN als Reserve verbunden; VPN noch ueber Ethernet'
+                    if wan_state.get('state') == 'LEASED' else 'Bekannte WLANs werden verbunden')
+            else:
+                service['/Wan/Reason'] = ('WLAN-Bereinigung fehlgeschlagen' if wan_state.get('state') == 'CLEANUP_FAILED'
+                    else 'WLAN-Reserve startet' if wan_requested else 'WLAN-Reserve ausgeschaltet')
+            service['/WifiWan/StateText'] = {
+                'LEASED': 'Verbunden', 'ASSOCIATED': 'Wartet auf IP-Adresse',
+                'CONNECTING': 'Verbindet', 'STARTING': 'Startet', 'OFF': 'Aus',
+                'CLEANUP_FAILED': 'Bereinigung fehlgeschlagen', 'missing': 'Nicht erkannt',
+                'ambiguous': 'Mehrere Funkmodule', 'idle': 'Nicht verbunden',
+                'online': 'Verbunden', 'ready': 'Verbunden', 'unavailable': 'Nicht verfuegbar',
+            }.get(str(service['/WifiWan/State']), 'Nicht verbunden')
             requested = (bool(settings['ap_enabled']), str(settings['ap_ssid']),
                          AP_SECRET.stat().st_mtime_ns if AP_SECRET.exists() else 0,
                          repr(configuration))
@@ -175,6 +215,12 @@ def main():
     try:
         loop.run()
     finally:
+        if wan_worker and wan_worker.poll() is None:
+            (WAN_ROOT / 'stop').touch()
+            try:
+                wan_worker.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                wan_worker.kill()
         if vpn_worker and vpn_worker.poll() is None:
             (VPN_ROOT / 'stop').touch()
             try:

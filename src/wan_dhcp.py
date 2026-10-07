@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """DHCP event hook: only the owned network namespace, never host DNS/routes."""
 import ipaddress
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -33,10 +34,14 @@ def main():
         raise RuntimeError('Refusing DHCP changes outside the owned WAN namespace')
     event = sys.argv[1]
     def command(args):
-        subprocess.run(args, check=True, capture_output=True, timeout=5)
+        return subprocess.run(args, check=True, capture_output=True, timeout=5)
     if event == 'deconfig':
         command(['ip', '-4', 'addr', 'flush', 'dev', INTERFACE])
-        command(['ip', '-4', 'route', 'flush', 'dev', INTERFACE])
+        # A new namespace may have no main FIB yet. Query all existing tables
+        # before flushing rather than treating its absence as a hook failure.
+        routes = json.loads(command(['ip', '-j', '-4', 'route', 'show', 'table', 'all']).stdout or b'[]')
+        if any(route.get('dev') == INTERFACE for route in routes):
+            command(['ip', '-4', 'route', 'flush', 'dev', INTERFACE])
         write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
     elif event in ('bound', 'renew'):
         value = lease(os.environ)
