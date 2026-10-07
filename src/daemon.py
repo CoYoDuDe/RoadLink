@@ -39,7 +39,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.7',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.8',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -74,9 +74,10 @@ def main():
     vpn_worker = None
     vpn_signature = None
     vpn_retry_at = 0
+    ap_retry_at = 0
 
     def refresh():
-        nonlocal worker, signature, failed, vpn_worker, vpn_signature, vpn_retry_at
+        nonlocal worker, signature, failed, vpn_worker, vpn_signature, vpn_retry_at, ap_retry_at
         try:
             import time
             vpn_invalid = False
@@ -131,28 +132,37 @@ def main():
                 service['/WifiWan/SSID'] = 'Nicht verfuegbar'
                 service['/WifiWan/State'] = 'missing' if not radios else 'ambiguous'
             requested = (bool(settings['ap_enabled']), str(settings['ap_ssid']),
-                         AP_SECRET.stat().st_mtime_ns if AP_SECRET.exists() else 0)
+                         AP_SECRET.stat().st_mtime_ns if AP_SECRET.exists() else 0,
+                         repr(configuration))
             if (Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()):
-                requested = (False, requested[1], requested[2])
+                requested = (False, *requested[1:])
             if requested != signature:
                 failed = None
+                ap_retry_at = 0
             if worker and worker.poll() is not None:
                 if signature == requested and requested[0]:
                     failed = requested
                 worker = None
+                ap_retry_at = time.monotonic() + 15
             if worker and (not requested[0] or signature != requested):
                 (AP_ROOT / 'stop').touch()
             elif not worker and not alive(load_json(AP_ROOT / 'guard.json', {})):
                 signature = requested
-                if requested[0] and failed != requested:
+                if requested[0] and time.monotonic() >= ap_retry_at:
+                    failed = None
                     worker = subprocess.Popen([sys.executable, str(Path(__file__).with_name('ap_runtime.py')),
                                                'serve', requested[1], str(os.getpid()), token(os.getpid())])
             ap_state = load_json(AP_ROOT / 'status.json', {})
+            internet = bool(worker and ap_state.get('internet')
+                            and vpn_worker and vpn_state.get('state') == 'READY')
+            service['/Security'] = 'AP ueber VPN, DNSmith' if internet else 'AP nur lokal'
             service['/AP/Status'] = ('Fehler: Diagnose pruefen' if failed else
-                ('Lokal, ohne Internet' if ap_state.get('state') == 'LAN_ONLY' else 'Startet') if worker
+                ('Internet ueber VPN' if internet else 'Lokal, ohne Internet'
+                 if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET') else 'Startet') if worker
                 else 'Aus')
             service['/AP/Address'] = ap_state.get('address', '') if worker else ''
-            service['/Status'] = ('Lokales WLAN aktiv' if ap_state.get('state') == 'LAN_ONLY'
+            service['/Status'] = ('WLAN-Internet ueber VPN' if internet else
+                                  'Lokales WLAN aktiv' if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET')
                                   else 'Fahrzeug-WLAN startet') if worker else 'Netzwerkdiagnose'
         except Exception:
             logging.exception('Status refresh failed')

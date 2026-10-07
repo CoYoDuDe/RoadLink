@@ -29,7 +29,12 @@ def rules(config):
            '-m', 'comment', '--comment', TAG, '-j', 'DROP']
     for tool in ('iptables', 'ip6tables'):
         for chain, direction in (('INPUT', '-i'), ('OUTPUT', '-o'), ('FORWARD', '-i'), ('FORWARD', '-o')):
-            yield [tool, chain, direction, INTERFACE, '-m', 'comment', '--comment', TAG, '-j', 'DROP']
+            exception = (['!', '-o' if direction == '-i' else '-i', 'aproadlink']
+                         if tool == 'iptables' and chain == 'FORWARD' else [])
+            # AP owns its ingress drops, source policy and constrained permits.
+            # These exclusions keep those permits valid after a VPN restart.
+            yield [tool, chain, direction, INTERFACE, *exception,
+                   '-m', 'comment', '--comment', TAG, '-j', 'DROP']
     yield ['iptables', 'OUTPUT', '-o', INTERFACE, '-s', config['address'],
            '-m', 'comment', '--comment', TAG, '-j', 'ACCEPT']
     yield ['iptables', 'INPUT', '-i', INTERFACE, '-d', config['address'],

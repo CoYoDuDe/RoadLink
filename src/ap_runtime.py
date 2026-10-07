@@ -12,6 +12,8 @@ import time
 from ap_config import hostapd, isolated_dhcp, choose_subnet
 from hardware import inspect_interfaces, resolve_role
 from storage import atomic_write, load_json, write_json
+from vpn_config import read as vpn_config
+import ap_router
 
 ROOT = Path('/run/roadlink-ap')
 SECRET = Path('/data/setupOptions/RoadLink/ap-secret.json')
@@ -83,6 +85,7 @@ def cleanup():
     if Path('/sys/class/net/' + INTERFACE).exists():
         errors.append('AP interface removal failed; firewall retained')
     else:
+        errors.extend(ap_router.cleanup(ROOT, command))
         for rule in reversed(list(rules())):
             command([rule[0], '-w', '3', '-D', *rule[1:]], check=False)
             if command([rule[0], '-w', '3', '-C', *rule[1:]], check=False).returncode == 0:
@@ -105,6 +108,12 @@ def guard(pid, start, lock_fd):
             break
         time.sleep(1)
     try:
+        # Prevent route/DHCP mutation racing independent cleanup.
+        if alive({'pid': pid, 'start': start}):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         cleanup()
     finally:
         os.close(lock_fd)
@@ -172,6 +181,8 @@ def serve(ssid, parent_pid, parent_start):
     routes = json.loads(command(['ip', '-j', '-4', 'route', 'show', 'table', 'all']).stdout)
     subnet = choose_subnet([r['dst'] for r in routes if r.get('dst') not in (None, 'default')])
     address = str(ipaddress.ip_network(subnet)[1])
+    vpn = vpn_config()
+    routing = ap_router.plan(subnet, vpn) if vpn and vpn['enabled'] else None
     config += 'ctrl_interface=' + str(ROOT / 'control') + '\n'
     atomic_write(ROOT / 'hostapd.conf', config.encode())
     dhcp = isolated_dhcp(INTERFACE, subnet).replace('/run/roadlink/ap.leases', str(ROOT / 'leases'))
@@ -196,6 +207,17 @@ def serve(ssid, parent_pid, parent_start):
     Path('/proc/sys/net/ipv6/conf/' + INTERFACE + '/disable_ipv6').write_text('1\n')
     command(['ip', 'addr', 'add', address + '/24', 'dev', INTERFACE])
     command(['ip', 'link', 'set', INTERFACE, 'up'])
+    if routing:
+        ap_router.start(ROOT, routing, command)
+    initial_vpn = load_json(Path('/run/roadlink-vpn/status.json'), {})
+    advertised_dns = (routing['dns'] if routing and initial_vpn.get('state') == 'READY'
+                      and alive(load_json(Path('/run/roadlink-vpn/controller.json'), {}))
+                      and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {})) else None)
+    if advertised_dns:
+        dhcp = isolated_dhcp(INTERFACE, subnet, advertised_dns).replace(
+            '/run/roadlink/ap.leases', str(ROOT / 'leases'))
+        atomic_write(ROOT / 'dnsmasq.conf', dhcp.encode())
+        command(['dnsmasq', '--test', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
     ap = launch('hostapd', ['hostapd', str(ROOT / 'hostapd.conf')])
     dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
     ready = False
@@ -211,8 +233,30 @@ def serve(ssid, parent_pid, parent_start):
             ready = 'state=ENABLED' in response.stdout.splitlines()
             if not ready and time.monotonic() > startup_deadline:
                 (ROOT / 'stop').touch()
-            write_json(ROOT / 'status.json', {'state': 'LAN_ONLY' if ready else 'STARTING',
-                       'address': address, 'ssid': ssid, 'internet': False})
+            vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
+            if routing:
+                ap_router.reconcile(command)
+            internet = bool(ready and routing and vpn_state.get('state') == 'READY'
+                            and alive(load_json(Path('/run/roadlink-vpn/controller.json'), {}))
+                            and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {})))
+            desired_dns = routing['dns'] if internet else None
+            if desired_dns != advertised_dns:
+                dhcp = isolated_dhcp(INTERFACE, subnet, desired_dns).replace(
+                    '/run/roadlink/ap.leases', str(ROOT / 'leases'))
+                atomic_write(ROOT / 'dnsmasq.conf', dhcp.encode())
+                command(['dnsmasq', '--test', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
+                dhcp_process.terminate()
+                try:
+                    dhcp_process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    dhcp_process.kill()
+                    dhcp_process.wait(timeout=2)
+                dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground',
+                                      '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
+                advertised_dns = desired_dns
+            write_json(ROOT / 'status.json', {'state': 'VPN_INTERNET' if internet else
+                       'LAN_ONLY' if ready else 'STARTING', 'address': address,
+                       'ssid': ssid, 'internet': internet, 'dns': advertised_dns or ''})
         time.sleep(2)
     ap.wait(timeout=5)
     dhcp_process.wait(timeout=5)

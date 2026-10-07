@@ -35,13 +35,20 @@ def choose_subnet(occupied, preferred='172.27.88.0/24'):
     raise ValueError('No non-overlapping AP subnet available')
 
 
-def isolated_dhcp(interface, subnet):
+def isolated_dhcp(interface, subnet, vpn_dns=None):
     if not re.fullmatch(r'ap[a-zA-Z0-9_]{1,12}', interface):
         raise ValueError('Invalid AP interface')
     net = ipaddress.ip_network(subnet)
     if net.version != 4 or net.prefixlen != 24 or not net.is_private:
         raise ValueError('Invalid AP subnet')
-    # No gateway or DNS advertised until routing and DNS protections are verified.
+    # Only the guarded AP runtime may advertise these after routing is active.
+    options = 'dhcp-option=3\ndhcp-option=6\n'
+    if vpn_dns is not None:
+        dns = ipaddress.ip_address(vpn_dns)
+        if dns.version != 4 or not dns.is_private or dns in net:
+            raise ValueError('VPN DNS must be private IPv4 outside the AP subnet')
+        options = 'dhcp-option=3,{}\ndhcp-option=6,{}\n'.format(net[1], dns)
     return ('interface={}\nbind-interfaces\nport=0\nno-resolv\nno-hosts\n'
-            'dhcp-range={},{},255.255.255.0,1h\ndhcp-option=3\ndhcp-option=6\n'
-            'dhcp-leasefile=/run/roadlink/ap.leases\n').format(interface, net[20], net[200])
+            'dhcp-range={},{},255.255.255.0,{}\n{}'
+            'dhcp-leasefile=/run/roadlink/ap.leases\n').format(
+                interface, net[20], net[200], '1h' if vpn_dns else '1m', options)
