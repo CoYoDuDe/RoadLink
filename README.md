@@ -1,6 +1,8 @@
 # RoadLink
 
-Venus OS networking addon using kwindrem SetupHelper. **Development release v0.5: local AP and native external-WLAN profile management with direct editing.**
+Venus OS networking addon using kwindrem SetupHelper. **Development release v0.6: local AP, native WLAN profiles and device-local VPN key provisioning.**
+
+`roadlink vpn-public-key` generates or reuses a WireGuard key locally on the device and prints only its public key. The private key remains mode 0600 outside the package; a lock prevents concurrent provisioning from replacing it. This command does not activate a tunnel or change routes. Server enrollment and protected WAN operation remain pending.
 
 The native GUI at Settings → RoadLink shows the default WAN interface, connected USB WLAN and explicit Internet/failover/protection limits. Its vehicle-WLAN page controls the AP and its SSID and shows its local address. `/data/RoadLink/roadlink status`, `hardware` and `diagnostics` provide diagnostics.
 

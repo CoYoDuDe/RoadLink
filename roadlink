@@ -16,7 +16,7 @@ from profiles import Profiles
 
 parser = argparse.ArgumentParser(description='RoadLink network diagnostics')
 parser.add_argument('command', choices=['status', 'hardware', 'diagnostics', 'configure-ap', 'ap-status', 'safe-mode',
-                                      'wifi-list', 'wifi-save', 'wifi-forget'])
+                                      'wifi-list', 'wifi-save', 'wifi-forget', 'vpn-public-key'])
 parser.add_argument('--ssid', default='breschdleng-roadlink')
 parser.add_argument('--generate', action='store_true', help='Generate a private AP password on this device')
 parser.add_argument('--security', choices=['psk', 'open'], default='psk')
@@ -24,6 +24,10 @@ parser.add_argument('--priority', type=int, default=50)
 parser.add_argument('--autoconnect', action='store_true')
 parser.add_argument('--id', dest='profile_id')
 args = parser.parse_args()
+if args.command == 'vpn-public-key':
+    from wireguard import ensure_public_key
+    print(ensure_public_key())
+    sys.exit(0)
 if args.command.startswith('wifi-'):
     if os.geteuid() != 0:
         parser.error('Root required')
