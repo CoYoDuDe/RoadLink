@@ -10,6 +10,7 @@ def install(service):
     service.add_path('/Wifi/Profiles', '[]')
     service.add_path('/Wifi/EditStatus', 'VPN-Verbindung noch nicht aktiv')
     pending = ['', 0, None]
+    editing = [None]
 
     def draft_changed(path, value):
         if path.endswith(('/SSID', '/Security')):
@@ -29,6 +30,21 @@ def install(service):
     def publish():
         service['/Wifi/Profiles'] = json.dumps(Profiles().metadata(), ensure_ascii=False)
 
+    def edit(path, value):
+        pending[:] = ['', 0, None]
+        profile = {} if value == 'new' else Profiles().data['profiles'].get(value)
+        editing[0] = None if value == 'new' else value
+        if profile is None:
+            editing[0] = None
+            profile = {}
+            service['/Wifi/EditStatus'] = 'Profil nicht gefunden'
+        else:
+            service['/Wifi/EditStatus'] = 'Neues WLAN' if value == 'new' else 'Passwort bleibt bei leerer Eingabe'
+        for name, field, default in [('SSID', 'ssid', ''), ('Security', 'security', 'psk'),
+                                     ('Priority', 'priority', 50), ('AutoConnect', 'autoconnect', False)]:
+            service['/Wifi/Draft/' + name] = int(profile.get(field, default)) if name == 'AutoConnect' else profile.get(field, default)
+        return bool(profile) or value == 'new'
+
     def password(path, value):
         if not 8 <= len(value) <= 63 or any(not 32 <= ord(c) <= 126 for c in value):
             service['/Wifi/EditStatus'] = 'Passwort: 8-63 ASCII-Zeichen'
@@ -46,7 +62,7 @@ def install(service):
             password_value = pending[0] if time.monotonic() < pending[1] and pending[2] == identity else ''
             Profiles().save(str(service['/Wifi/Draft/SSID']), str(service['/Wifi/Draft/Security']),
                             password_value, int(service['/Wifi/Draft/Priority']),
-                            bool(service['/Wifi/Draft/AutoConnect']))
+                            bool(service['/Wifi/Draft/AutoConnect']), edit_id=editing[0])
             pending[:] = ['', 0, None]
             publish()
             service['/Wifi/EditStatus'] = 'Profil gespeichert'
@@ -65,6 +81,7 @@ def install(service):
             service['/Wifi/EditStatus'] = 'Entfernen fehlgeschlagen'
             return False
 
-    for path, callback in [('/Wifi/Draft/Password', password), ('/Wifi/Draft/Save', save), ('/Wifi/Forget', forget)]:
+    for path, callback in [('/Wifi/Draft/Password', password), ('/Wifi/Draft/Save', save),
+                           ('/Wifi/Forget', forget), ('/Wifi/Edit', edit)]:
         service.add_path(path, '', writeable=True, itemtype=SecretItem, onchangecallback=callback)
     publish()

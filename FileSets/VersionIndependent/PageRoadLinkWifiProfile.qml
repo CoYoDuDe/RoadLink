@@ -8,7 +8,7 @@ MbPage {
         MbItemText { text: qsTr("VPN erforderlich") }
         MbItemText { text: qsTr("Prioritaet: ") + root.profile.priority }
         MbItemText { text: root.profile.autoconnect ? qsTr("Automatische Verbindung vorgesehen") : qsTr("Automatische Verbindung aus") }
-        MbItemText { text: qsTr("Zum Aendern mit gleichem Namen speichern") }
+        MbSubMenu { description: qsTr("Bearbeiten"); subpage: Component { PageRoadLinkWifiAdd { profileId: root.profile.id || "" } } }
         MbItemOptions {
             description: qsTr("WLAN vergessen")
             bind: "com.coyodude.roadlink/Wifi/Forget"

@@ -37,7 +37,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.4',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.5',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',

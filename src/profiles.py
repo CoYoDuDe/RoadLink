@@ -13,7 +13,7 @@ class Profiles:
         if self.data.get('schema') != 1:
             raise ValueError('Unsupported WLAN profile schema')
 
-    def save(self, ssid, security, password='', priority=50, autoconnect=False):
+    def save(self, ssid, security, password='', priority=50, autoconnect=False, edit_id=None):
         if not isinstance(ssid, str) or not 1 <= len(ssid.encode('utf-8')) <= 32 or '\x00' in ssid:
             raise ValueError('SSID must contain 1 to 32 UTF-8 bytes')
         if security not in ('psk', 'open'):
@@ -23,6 +23,13 @@ class Profiles:
         if type(autoconnect) is not bool:
             raise ValueError('Autoconnect must be boolean')
         identifier = hashlib.sha256((security + '\x00' + ssid).encode()).hexdigest()[:24]
+        if edit_id is not None:
+            if edit_id not in self.data['profiles']:
+                raise ValueError('Unknown WLAN profile')
+            if any(p['ssid'] == ssid and p['security'] == security and key != edit_id
+                   for key, p in self.data['profiles'].items()):
+                raise ValueError('WLAN profile already exists')
+            identifier = edit_id
         existing = self.data['profiles'].get(identifier, {})
         password = password or existing.get('password', '')
         if security == 'psk' and not (8 <= len(password) <= 63 and all(32 <= ord(c) <= 126 for c in password)):
