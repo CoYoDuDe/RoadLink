@@ -1,5 +1,7 @@
 """Validated device-local VPN settings. Endpoint bootstrap needs no WAN DNS."""
 import ipaddress
+import os
+from contextlib import contextmanager
 from pathlib import Path
 from storage import load_json, write_json
 from wireguard import validate_key
@@ -27,9 +29,14 @@ def validate(value):
     mtu = value.get('mtu', 1380)
     if type(mtu) is not int or not 1280 <= mtu <= 1420:
         raise ValueError('VPN MTU must be 1280 to 1420')
-    return {'enabled': value['enabled'], 'endpoint': str(endpoint), 'port': port,
+    result = {'enabled': value['enabled'], 'endpoint': str(endpoint), 'port': port,
             'public_key': validate_key(value['public_key']), 'address': str(address),
             'dns': str(dns), 'mtu': mtu}
+    if 'provider' in value:
+        if value['provider'] not in ('dnsmith', 'custom'):
+            raise ValueError('Invalid VPN provider')
+        result['provider'] = value['provider']
+    return result
 
 
 def read(path=CONFIG):
@@ -37,5 +44,34 @@ def read(path=CONFIG):
     return validate(value) if value is not None else None
 
 
+@contextmanager
+def locked(path):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.is_symlink() or path.parent.is_symlink():
+        raise ValueError('Refusing a symlink VPN configuration')
+    if os.name != 'posix':
+        yield
+        return
+    import fcntl
+    fd = os.open(str(path) + '.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'a') as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        yield
+
+
 def save(value, path=CONFIG):
-    write_json(path, validate(value))
+    config = validate(value)
+    with locked(path):
+        write_json(path, config)
+
+
+def install_if_missing(value, path=CONFIG, permitted=lambda: True):
+    """A delayed enrollment response must never overwrite user configuration."""
+    config = validate(value)
+    with locked(path):
+        if Path(path).exists() or not permitted():
+            return False
+        write_json(path, config)
+        return True

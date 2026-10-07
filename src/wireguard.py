@@ -12,7 +12,7 @@ KEY = Path('/data/setupOptions/RoadLink/wireguard/client.key')
 def validate_key(value):
     try:
         raw = base64.b64decode(value, validate=True)
-    except (ValueError, binascii.Error) as error:
+    except (TypeError, ValueError, binascii.Error) as error:
         raise ValueError('Invalid WireGuard key') from error
     if len(raw) != 32 or raw == bytes(32) or base64.b64encode(raw).decode() != value:
         raise ValueError('Invalid WireGuard key')

@@ -22,5 +22,15 @@ MbPage {
         MbItemValue { description: qsTr("Beschleunigung"); item.bind: "com.coyodude.roadlink/Wan/Acceleration" }
         MbItemValue { description: qsTr("VPN-Verbindung"); item.bind: "com.coyodude.roadlink/VPN/Status" }
         MbItemValue { description: qsTr("DNS"); item.bind: "com.coyodude.roadlink/VPN/DNS" }
+        MbSwitch {
+            name: qsTr("DNSmith automatisch einrichten")
+            bind: "com.victronenergy.settings/Settings/RoadLink/VPN/AutoEnroll"
+            valueTrue: 1
+            valueFalse: 0
+            writeAccessLevel: User.AccessInstaller
+        }
+        MbItemValue { description: qsTr("Einrichtung"); item.bind: "com.coyodude.roadlink/VPN/Enrollment" }
+        MbItemText { text: qsTr("Standardanbieter: DNSmith.net") }
+        MbItemText { text: qsTr("Kostenlos; Unterstuetzung freiwillig") }
     }
 }

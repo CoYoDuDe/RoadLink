@@ -13,6 +13,22 @@ MARK = '0x524c'
 TAG = 'roadlink-wan-bridge-owned'
 
 
+def bootstrap_rules():
+    """No host bridge: only DHCP and two certificate-validated HTTPS services."""
+    from enrollment import ADDRESS
+    tag = ['-m', 'comment', '--comment', TAG]
+    for chain in ('INPUT', 'OUTPUT', 'FORWARD'):
+        yield ('filter', chain, tag + ['-j', 'DROP'])
+    for chain in ('INPUT', 'OUTPUT'):
+        yield ('filter', chain, ['-i' if chain == 'INPUT' else '-o', 'lo'] + tag + ['-j', 'ACCEPT'])
+    yield ('filter', 'OUTPUT', ['-o', RADIO, '-p', 'udp', '--sport', '68', '--dport', '67'] + tag + ['-j', 'ACCEPT'])
+    yield ('filter', 'INPUT', ['-i', RADIO, '-p', 'udp', '--sport', '67', '--dport', '68'] + tag + ['-j', 'ACCEPT'])
+    for address in (ADDRESS, '1.1.1.1'):
+        yield ('filter', 'OUTPUT', ['-o', RADIO, '-d', address, '-p', 'tcp', '--dport', '443'] + tag + ['-j', 'ACCEPT'])
+        yield ('filter', 'INPUT', ['-i', RADIO, '-s', address, '-p', 'tcp', '--sport', '443',
+               '-m', 'conntrack', '--ctstate', 'ESTABLISHED'] + tag + ['-j', 'ACCEPT'])
+
+
 def plan(endpoint, port, subnet='172.27.250.0/30'):
     endpoint = ipaddress.IPv4Address(endpoint)
     network = ipaddress.IPv4Network(subnet)

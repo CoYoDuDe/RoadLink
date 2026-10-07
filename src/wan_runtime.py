@@ -17,7 +17,7 @@ from wan_scan import Scanner
 from open_wifi import Candidates
 from storage import atomic_write, load_json, write_json
 from wan_config import station, dhcp_args, client_name
-from wan_bridge import plan, rules, ipv6_rules
+from wan_bridge import plan, rules, ipv6_rules, bootstrap_rules
 from vpn_config import read as vpn_config
 import wan_bridge_runtime
 import owned_netns
@@ -67,7 +67,7 @@ def inside(args, check=True):
 
 
 def stop_children():
-    children = [load_json(ROOT / (name + '.json'), {}) for name in ('scanner', 'mutation', 'supplicant', 'dhcp', 'namespace_creator')]
+    children = [load_json(ROOT / (name + '.json'), {}) for name in ('scanner', 'mutation', 'supplicant', 'dhcp', 'namespace_creator', 'enrollment')]
     for sig, seconds in ((signal.SIGTERM, 3), (signal.SIGKILL, 2)):
         for state in children:
             if alive(state):
@@ -189,7 +189,7 @@ def stop():
     raise RuntimeError('WAN cleanup incomplete; refusing package changes')
 
 
-def serve(parent_pid, parent_start, hostname='', auto_open=False):
+def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=False):
     hostname = client_name(hostname)
     if os.geteuid() != 0: raise RuntimeError('Root required')
     lock = open('/run/roadlink-wan.lock', 'a')
@@ -203,8 +203,10 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False):
     for profile in profiles: station(profile, str(ROOT / 'control'))
     vpn = vpn_config()
     routable = bool(vpn and vpn['enabled'])
-    candidates = Candidates(store.data, enabled=auto_open and routable)
-    if not routable: profiles = []  # scan-only: no station association/DHCP
+    bootstrap = bool(auto_enroll and vpn is None)
+    associate = routable or bootstrap
+    candidates = Candidates(store.data, enabled=auto_open and associate)
+    if not associate: profiles = []  # scan-only: no station association/DHCP
     dev = resolve_role(inspect_interfaces(), 'wifi_wan')
     name = dev['interface']
     cap = capabilities(name)
@@ -257,6 +259,10 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False):
             for family, builder in (('iptables', rules(firewall, 'wan')), ('ip6tables', ipv6_rules('wan'))):
                 for table, chain, args in builder:
                     mutate(['ip', 'netns', 'exec', NS, family, '-w', '3', '-t', table, '-I', chain, '1', *args])
+        elif bootstrap:
+            for family, builder in (('iptables', bootstrap_rules()), ('ip6tables', ipv6_rules('wan'))):
+                for table, chain, args in builder:
+                    mutate(['ip', 'netns', 'exec', NS, family, '-w', '3', '-t', table, '-I', chain, '1', *args])
         else:
             for family in ('iptables', 'ip6tables'):
                 for chain in ('INPUT', 'OUTPUT', 'FORWARD'):
@@ -281,7 +287,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False):
             pulse()
             if not any(v['ifindex'] == state['ifindex'] for v in radio_info(True)):
                 raise RuntimeError('USB radio unplugged')
-            if profile is None and routable:
+            if profile is None and associate:
                 profile = candidates.select(load_json(ROOT / 'scan.json', {}), time.time(), time.monotonic())
             if profile is None:
                 if candidates.enabled and time.monotonic() >= next_scan and not scanner.pending():
@@ -345,7 +351,8 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False):
             write_json(ROOT / 'status.json', {'state': 'LEASED' if leased else 'ASSOCIATED' if connected else 'CONNECTING',
                        'ssid': profile['ssid'] if connected else '', 'profile_id': profile['id'],
                        'identity': state['identity'], 'driver': state['driver'], 'interface': RADIO,
-                       'address': lease.get('address', '') if leased else '', 'internet': False, 'bridge': bridge})
+                       'address': lease.get('address', '') if leased else '', 'internet': False,
+                       'bridge': bridge, 'bootstrap': bootstrap})
             failed = (supplicant and supplicant.poll() is not None) or (dhcp and dhcp.poll() is not None)
             vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
             if (leased and profile.get('discovered') and vpn_state.get('state') == 'READY'
@@ -386,5 +393,5 @@ if __name__ == '__main__':
     elif action == 'guard': guard(int(sys.argv[2]), sys.argv[3], int(sys.argv[4]))
     elif action == 'stop': stop()
     elif action == 'serve': serve(int(sys.argv[2]), sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else '',
-                                len(sys.argv) > 5 and sys.argv[5] == '1')
+                                len(sys.argv) > 5 and sys.argv[5] == '1', len(sys.argv) > 6 and sys.argv[6] == '1')
     else: raise ValueError('Unknown WAN command')

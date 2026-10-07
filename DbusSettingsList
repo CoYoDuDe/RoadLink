@@ -4,3 +4,4 @@
 {"path":"/Settings/RoadLink/WifiWan/ClientName", "default":""}
 {"path":"/Settings/RoadLink/WifiWan/AutoOpen", "default":0, "min":0, "max":1}
 {"path":"/Settings/RoadLink/Wan/Mode", "default":"AUTO"}
+{"path":"/Settings/RoadLink/VPN/AutoEnroll", "default":1, "min":0, "max":1}
