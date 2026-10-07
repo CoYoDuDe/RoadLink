@@ -2,4 +2,5 @@
 {"path":"/Settings/RoadLink/AP/SSID", "default":"RoadLink"}
 {"path":"/Settings/RoadLink/WifiWan/Enabled", "default":0, "min":0, "max":1}
 {"path":"/Settings/RoadLink/WifiWan/ClientName", "default":""}
+{"path":"/Settings/RoadLink/WifiWan/AutoOpen", "default":0, "min":0, "max":1}
 {"path":"/Settings/RoadLink/Wan/Mode", "default":"AUTO"}

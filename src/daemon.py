@@ -41,11 +41,12 @@ def main():
         'ap_ssid': ['/Settings/RoadLink/AP/SSID', 'RoadLink', 0, 0],
         'wan_enabled': ['/Settings/RoadLink/WifiWan/Enabled', 0, 0, 1],
         'client_name': ['/Settings/RoadLink/WifiWan/ClientName', '', 0, 0],
+        'auto_open': ['/Settings/RoadLink/WifiWan/AutoOpen', 0, 0, 1],
         'wan_mode': ['/Settings/RoadLink/Wan/Mode', 'AUTO', 0, 0],
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.13.1',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.14',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -119,7 +120,7 @@ def main():
             hostname = client_name(str(settings['client_name']))
             service['/WifiWan/ClientName'] = hostname
             wan_current = (repr(configuration), profiles_path.stat().st_mtime_ns
-                           if profiles_path.exists() else 0, hostname) if wan_requested else None
+                           if profiles_path.exists() else 0, hostname, bool(settings['auto_open'])) if wan_requested else None
             if wan_worker and wan_worker.poll() is not None:
                 wan_worker = None
                 wan_retry_at = time.monotonic() + 15
@@ -131,7 +132,7 @@ def main():
                     wan_signature = wan_current
                     wan_worker = subprocess.Popen([sys.executable,
                         str(Path(__file__).with_name('wan_runtime.py')), 'serve',
-                        str(os.getpid()), token(os.getpid()), hostname])
+                        str(os.getpid()), token(os.getpid()), hostname, str(int(settings['auto_open']))])
             if vpn_worker and vpn_worker.poll() is not None:
                 vpn_worker = None
                 vpn_retry_at = time.monotonic() + 15
@@ -179,10 +180,10 @@ def main():
             if wan_worker and alive(load_json(WAN_ROOT / 'guard.json', {})):
                 service['/WifiWan'] = 'Isolierter USB-Stick (' + wan_state.get('driver', 'startet') + ')'
                 service['/WifiWan/SSID'] = wan_state.get('ssid') or ('Suchmodus, nicht verbunden'
-                    if wan_state.get('state') == 'SCAN_ONLY' else 'Verbindet bekanntes WLAN')
+                    if wan_state.get('state') == 'SCAN_ONLY' else 'Verbindet WLAN')
                 service['/WifiWan/State'] = wan_state.get('state', 'STARTING')
                 service['/Wan/Reason'] = ('WLAN als Reserve verbunden; VPN noch ueber Ethernet'
-                    if wan_state.get('state') == 'LEASED' else 'Bekannte WLANs werden verbunden')
+                    if wan_state.get('state') == 'LEASED' else 'WLANs werden gesucht oder geprueft')
             else:
                 service['/Wan/Reason'] = ('WLAN-Bereinigung fehlgeschlagen' if wan_state.get('state') == 'CLEANUP_FAILED'
                     else 'WLAN-Reserve startet' if wan_requested else 'WLAN-Reserve ausgeschaltet')

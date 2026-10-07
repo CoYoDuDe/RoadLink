@@ -8,11 +8,13 @@ import signal
 import subprocess
 import sys
 import time
+import secrets
 from ap_runtime import command, token, alive
 from hardware import inspect_interfaces, resolve_role, capabilities
 from profiles import Profiles
 from privacy import profile_mac
 from wan_scan import Scanner
+from open_wifi import Candidates
 from storage import atomic_write, load_json, write_json
 from wan_config import station, dhcp_args, client_name
 from wan_bridge import plan, rules, ipv6_rules
@@ -187,7 +189,7 @@ def stop():
     raise RuntimeError('WAN cleanup incomplete; refusing package changes')
 
 
-def serve(parent_pid, parent_start, hostname=''):
+def serve(parent_pid, parent_start, hostname='', auto_open=False):
     hostname = client_name(hostname)
     if os.geteuid() != 0: raise RuntimeError('Root required')
     lock = open('/run/roadlink-wan.lock', 'a')
@@ -201,6 +203,7 @@ def serve(parent_pid, parent_start, hostname=''):
     for profile in profiles: station(profile, str(ROOT / 'control'))
     vpn = vpn_config()
     routable = bool(vpn and vpn['enabled'])
+    candidates = Candidates(store.data, enabled=auto_open and routable)
     if not routable: profiles = []  # scan-only: no station association/DHCP
     dev = resolve_role(inspect_interfaces(), 'wifi_wan')
     name = dev['interface']
@@ -265,10 +268,12 @@ def serve(parent_pid, parent_start, hostname=''):
         if not profiles:
             inside(['ip', 'link', 'set', RADIO, 'address', profile_mac(bytes.fromhex(store.data['seed']), 'passive-scan')])
             inside(['ip', 'link', 'set', RADIO, 'up'])
-        cursor, retry = 0, 0
+        retry, next_scan = 0, 0
+        profile = None
         supplicant = dhcp = None
         scan_paused = False
         started = 0
+        last_health, health_failures = 0, 0
         while not (ROOT / 'stop').exists():
             if not alive({'pid': parent_pid, 'start': parent_start}): break
             if not alive(load_json(ROOT / 'guard.json', {})): raise RuntimeError('WAN guard exited')
@@ -276,13 +281,17 @@ def serve(parent_pid, parent_start, hostname=''):
             pulse()
             if not any(v['ifindex'] == state['ifindex'] for v in radio_info(True)):
                 raise RuntimeError('USB radio unplugged')
-            if not profiles:
+            if profile is None and routable:
+                profile = candidates.select(load_json(ROOT / 'scan.json', {}), time.time(), time.monotonic())
+            if profile is None:
+                if candidates.enabled and time.monotonic() >= next_scan and not scanner.pending():
+                    write_json(ROOT / 'scan-request.json', {'request': secrets.token_hex(12)})
+                    next_scan = time.monotonic() + 150
                 write_json(ROOT / 'status.json', {'state': 'SCAN_ONLY', 'ssid': '', 'internet': False,
                            'driver': state['driver'], 'interface': RADIO, 'identity': state['identity']})
                 scanner.tick(True)
                 time.sleep(1)
                 continue
-            profile = profiles[cursor % len(profiles)]
             if scanner.pending() and (scan_paused or load_json(ROOT / 'status.json', {}).get('state') != 'LEASED'):
                 if not scan_paused:
                     stop_children(); supplicant = dhcp = None
@@ -310,6 +319,7 @@ def serve(parent_pid, parent_start, hostname=''):
                 supplicant = launch('supplicant', ['wpa_supplicant', '-Dnl80211', '-i', RADIO,
                                     '-c', str(ROOT / 'station.conf')])
                 started = time.monotonic()
+                last_health, health_failures = 0, 0
             response = inside(['wpa_cli', '-p', str(ROOT / 'control'), '-i', RADIO, 'status'], check=False)
             status = dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
             connected = status.get('wpa_state') == 'COMPLETED'
@@ -321,15 +331,31 @@ def serve(parent_pid, parent_start, hostname=''):
             if connected and dhcp is None:
                 dhcp = launch('dhcp', dhcp_args(RADIO, '/data/RoadLink/src/wan_dhcp.py', hostname))
             leased = connected and dhcp and dhcp.poll() is None and lease.get('state') == 'LEASED'
+            if leased and time.monotonic() - last_health >= 10:
+                pulse()
+                try:
+                    check = inside([sys.executable, str(Path(__file__).with_name('wan_health.py')), RADIO], check=False)
+                    healthy = bool(json.loads(check.stdout).get('healthy'))
+                except (ValueError, subprocess.TimeoutExpired):
+                    healthy = False
+                pulse()
+                health_failures = 0 if healthy else health_failures + 1
+                last_health = time.monotonic()
             scanner.tick(bool(leased))
             write_json(ROOT / 'status.json', {'state': 'LEASED' if leased else 'ASSOCIATED' if connected else 'CONNECTING',
                        'ssid': profile['ssid'] if connected else '', 'profile_id': profile['id'],
                        'identity': state['identity'], 'driver': state['driver'], 'interface': RADIO,
                        'address': lease.get('address', '') if leased else '', 'internet': False, 'bridge': bridge})
             failed = (supplicant and supplicant.poll() is not None) or (dhcp and dhcp.poll() is not None)
-            if failed or (supplicant and not leased and time.monotonic() - started > 45):
+            vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
+            tunnel_failed = (leased and vpn_state.get('penalties', {}).get('wifi', False)
+                             and vpn_state.get('wifi_penalty_profile') == profile['id'])
+            if failed or health_failures >= 2 or tunnel_failed or (supplicant and not leased and time.monotonic() - started > 45):
                 stop_children(); supplicant = dhcp = None
-                cursor += 1; retry = time.monotonic() + 5
+                candidates.reject(profile['id'], time.monotonic())
+                profile = None
+                health_failures = 0
+                retry = time.monotonic() + 5
                 write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
             time.sleep(1)
     except Exception:
@@ -353,5 +379,6 @@ if __name__ == '__main__':
     if action == 'child': child(sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5:])
     elif action == 'guard': guard(int(sys.argv[2]), sys.argv[3], int(sys.argv[4]))
     elif action == 'stop': stop()
-    elif action == 'serve': serve(int(sys.argv[2]), sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else '')
+    elif action == 'serve': serve(int(sys.argv[2]), sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else '',
+                                len(sys.argv) > 5 and sys.argv[5] == '1')
     else: raise ValueError('Unknown WAN command')

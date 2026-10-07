@@ -67,15 +67,28 @@ def start(root, config, command):
     reconcile(command)
 
 
-def reconcile(command):
-    # Kernel removal of WireGuard also removes this route; unreachable remains.
-    if Path('/sys/class/net/' + VPN).exists():
-        alias = Path('/sys/class/net/' + VPN + '/ifalias').read_text().strip()
+def vpn_interface_ready():
+    device = Path('/sys/class/net/' + VPN)
+    try:
+        alias = (device / 'ifalias').read_text().strip()
         if alias != 'roadlink-vpn-owned':
             raise RuntimeError('Foreign VPN interface; AP remains blocked')
+        return bool(int((device / 'flags').read_text().strip(), 16) & 1)
+    except FileNotFoundError:
+        return False
+
+
+def reconcile(command):
+    # Kernel removal of WireGuard also removes this route; unreachable remains.
+    if vpn_interface_ready():
         current = command(['ip', 'route', 'show', 'table', TABLE], check=False).stdout
         if 'default dev ' + VPN + ' ' not in current:
-            command(['ip', 'route', 'replace', 'default', 'dev', VPN, 'metric', '10', 'table', TABLE])
+            result = command(['ip', 'route', 'replace', 'default', 'dev', VPN,
+                              'metric', '10', 'table', TABLE], check=False)
+            if result.returncode and vpn_interface_ready():
+                raise RuntimeError('AP VPN route installation failed')
+            # If the VPN disappeared or went down meanwhile, retain the
+            # unreachable route and retry next tick without restarting AP.
 
 
 def cleanup(root, command):

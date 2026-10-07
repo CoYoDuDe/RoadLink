@@ -38,7 +38,8 @@ def parse(output, exclude_bssids=()):
         section = rsn[0] if rsn else ''
         psk = bool(re.search(r'Authentication suites:.*\bPSK\b', section))
         ccmp = bool(re.search(r'Pairwise ciphers:.*\bCCMP\b', section))
-        security = 'psk' if rsn and psk and ccmp else 'unsupported' if privacy or rsn else 'open'
+        legacy_wpa = bool(re.search(r'(?m)^\tWPA:', block))
+        security = 'psk' if rsn and psk and ccmp else 'unsupported' if privacy or rsn or legacy_wpa else 'open'
         identifier = hashlib.sha256((security + '\0' + ssid).encode()).hexdigest()[:24]
         value = {'id': identifier, 'ssid': ssid, 'security': security, 'signal': strength,
                  'frequency': frequency, 'associated': '-- associated' in block.splitlines()[0]}

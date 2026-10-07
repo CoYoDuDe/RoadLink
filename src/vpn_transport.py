@@ -42,7 +42,8 @@ def wifi(state):
         return None
     bridge = state['bridge']
     return {'dev': HOST, 'source': str(ipaddress.IPv4Address(bridge['host'])),
-            'gateway': str(ipaddress.IPv4Address(bridge['peer']))}
+            'gateway': str(ipaddress.IPv4Address(bridge['peer'])),
+            'profile_id': state.get('profile_id', '')}
 
 
 def select(config, route, command):

@@ -190,6 +190,7 @@ def serve(parent_pid, parent_start):
     selection = Selector(recoveries=1, failures=2)
     active, selected_route = None, None
     penalties = {'ethernet': 0, 'wifi': 0}
+    wifi_penalty_profile = ''
     dns_failures = 0
     health = {}
     tunnel_https = False
@@ -239,6 +240,7 @@ def serve(parent_pid, parent_start):
             dns_failures = 0 if dns_ready else dns_failures + 1
             if active and dns_failures >= 2:
                 penalties[active] = time.monotonic() + 60
+                if active == 'wifi': wifi_penalty_profile = wan.get('profile_id', '')
         values = command(['wg', 'show', INTERFACE, 'latest-handshakes']).stdout.split()
         handshake = int(values[1]) if len(values) == 2 else 0
         fresh = bool(handshake and 0 <= time.time() - handshake < 180)
@@ -246,7 +248,8 @@ def serve(parent_pid, parent_start):
                    'dns_ready': bool(fresh and dns_ready), 'internet': bool(fresh and dns_ready and tunnel_https),
                    'handshake': handshake, 'endpoint': config['endpoint'],
                    'address': config['address'], 'dns': config['dns'], 'wan': active or '', 'health': health,
-                   'mode': mode, 'penalties': {key: time.monotonic() < expiry for key, expiry in penalties.items()}})
+                   'mode': mode, 'wifi_penalty_profile': wifi_penalty_profile,
+                   'penalties': {key: time.monotonic() < expiry for key, expiry in penalties.items()}})
         time.sleep(1)
     # The independent guard owns final cleanup and keeps the flock until done.
 

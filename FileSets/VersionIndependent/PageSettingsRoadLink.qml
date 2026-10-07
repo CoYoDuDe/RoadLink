@@ -49,5 +49,10 @@ MbPage {
         MbItemValue { description: qsTr("Namestatus"); item.bind: "com.coyodude.roadlink/WifiWan/ClientNameStatus" }
         MbItemText { text: qsTr("Leer: kein DHCP-Name") }
         MbItemText { text: qsTr("1-63 Buchstaben, Ziffern oder Bindestriche") }
+        MbSwitch {
+            name: qsTr("Offene WLANs automatisch pruefen")
+            bind: "com.victronenergy.settings/Settings/RoadLink/WifiWan/AutoOpen"
+            writeAccessLevel: User.AccessInstaller
+        }
     }
 }

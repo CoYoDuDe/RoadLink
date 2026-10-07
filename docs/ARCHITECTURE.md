@@ -46,6 +46,10 @@ Die passive Suche läuft in einem separat registrierten Prozess mit höchstens d
 
 Der Suchbetrieb ist auch ohne gespeicherte Profile oder VPN möglich. Dann gibt es keine IP-Adresse, keinen DHCP-Prozess und keine Host-Verbindung. Ohne VPN bleibt die automatische Verbindung gesperrt.
 
+Der Schalter **Offene WLANs automatisch prüfen** ist standardmäßig aus. Bei eingeschaltetem Schalter werden echte offene Netze aus höchstens drei Minuten alten Suchergebnissen als vorübergehende Kandidaten verwendet. Gespeicherte WLANs behalten Vorrang; deaktivierte Profile und offene Varianten gespeicherter verschlüsselter SSIDs werden ausgeschlossen. Gefundene Netze werden nicht automatisch gespeichert oder als vertrauenswürdig markiert. Ihre private MAC-Adresse wird aus der lokalen Gerätekennung und Profilkennung abgeleitet.
+
+Nach zwei fehlgeschlagenen HTTPS-Prüfungen oder einem dem aktuellen Profil zugeordneten Tunnel-Fehler wird ein Kandidat verworfen. Verbindungsaufbau ohne IP-Adresse endet nach 45 Sekunden. Wartezeiten steigen bei wiederholten Fehlern von 60 auf höchstens 900 Sekunden. Ohne brauchbaren Kandidaten wird höchstens alle 150 Sekunden eine passive Suche angefordert; laufende manuelle Suchen werden nicht ersetzt. Die Internetfreigabe bleibt an aktuellen VPN-, DNS- und Tunnel-HTTPS-Nachweis gebunden. Captive-Portal-Erkennung und Anmeldung sind noch offen.
+
 ## Diagnose
 
 ```sh
