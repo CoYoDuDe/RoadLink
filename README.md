@@ -1,6 +1,8 @@
 # RoadLink
 
-Venus OS networking addon using kwindrem SetupHelper. **Development release v0.10: guarded Ethernet/USB-WLAN selection, vehicle AP Internet through WireGuard and native WLAN profile management.**
+Venus OS networking addon using kwindrem SetupHelper. **Development release v0.11: guarded Ethernet/USB-WLAN selection, vehicle AP Internet through WireGuard and native WLAN profile management.**
+
+v0.11 hardens interrupted setup: namespace identity is journalled before its named mount becomes visible, and a down veth pair has a private temporary peer identity before its alias is assigned. The guard stops registered command processes as well as station/DHCP children before restoration. Targeted live crash checks cover temporary-file creation, name publication, namespace mounting and veth creation; each restored the USB radio and removed owned interfaces, mounts and firewall rules.
 
 The USB reserve now carries the encrypted tunnel through an endpoint-only private link. The GUI offers AUTO, PREFER_STARLINK, PREFER_WIFI, BEST_CONNECTION, STARLINK_ONLY and WIFI_ONLY and shows the selected path, connected WLAN and readiness. Each path has a bound, certificate-verified HTTPS check; tunnel readiness additionally requires DNS, HTTPS and a recent WireGuard handshake. Failed tunnel DNS temporarily excludes a path so AUTO can try the reserve. Selection uses hysteresis to avoid rapid switching. BEST_CONNECTION currently compares probe latency; bandwidth measurement, durable learned ranking and bonding/acceleration remain pending.
 

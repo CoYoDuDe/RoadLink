@@ -16,6 +16,7 @@ from wan_config import station, dhcp_args
 from wan_bridge import plan, rules, ipv6_rules
 from vpn_config import read as vpn_config
 import wan_bridge_runtime
+import owned_netns
 
 ROOT = Path('/run/roadlink-wan')
 NS = 'roadlink-wan'
@@ -41,19 +42,28 @@ def pulse():
     atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
 
 
+def tracked_command(args, check=True):
+    controller = load_json(ROOT / 'controller.json', {})
+    if controller.get('pid') == os.getpid() and not (ROOT / 'cleaning').exists():
+        return subprocess.run([sys.executable, __file__, 'child', 'mutation', str(os.getpid()),
+                               token(os.getpid()), *args], capture_output=True, text=True,
+                              timeout=8, check=check)
+    return command(args, check=check)
+
+
 def mutate(args):
     if (ROOT / 'stop').exists() or not alive(load_json(ROOT / 'guard.json', {})):
         raise RuntimeError('WAN guard unavailable')
     pulse()
-    return command(args)
+    return tracked_command(args)
 
 
 def inside(args, check=True):
-    return command(['ip', 'netns', 'exec', NS, *args], check=check)
+    return tracked_command(['ip', 'netns', 'exec', NS, *args], check=check)
 
 
 def stop_children():
-    children = [load_json(ROOT / (name + '.json'), {}) for name in ('supplicant', 'dhcp')]
+    children = [load_json(ROOT / (name + '.json'), {}) for name in ('mutation', 'supplicant', 'dhcp', 'namespace_creator')]
     for sig, seconds in ((signal.SIGTERM, 3), (signal.SIGKILL, 2)):
         for state in children:
             if alive(state):
@@ -70,7 +80,8 @@ def stop_children():
 
 def namespace_owned(state):
     path = Path('/run/netns') / NS
-    return path.exists() and path.stat().st_ino == state.get('namespace_inode')
+    return (not path.is_symlink() and path.exists() and path.stat().st_ino == state.get('namespace_inode')
+            and (not state.get('namespace_device') or path.stat().st_dev == state['namespace_device']))
 
 
 def radio_info(namespace=False):
@@ -85,6 +96,7 @@ def cleanup():
     errors = []
     try:
         stop_children()
+        owned_netns.remove_placeholder(state, NS)
         wan_bridge_runtime.cleanup(ROOT, command)
         ns_path = Path('/run/netns') / NS
         if ns_path.exists():
@@ -134,12 +146,19 @@ def guard(pid, start, lock_fd):
     if alive({'pid': pid, 'start': start}):
         try: os.kill(pid, signal.SIGKILL)
         except ProcessLookupError: pass
+    deadline = time.monotonic() + 3
+    while alive({'pid': pid, 'start': start}) and time.monotonic() < deadline: time.sleep(.05)
+    if alive({'pid': pid, 'start': start}):
+        write_json(ROOT / 'result.json', {'cleaned': False, 'errors': ['WAN controller could not stop']})
+        write_json(ROOT / 'status.json', {'state': 'CLEANUP_FAILED', 'ssid': '', 'internet': False})
+        os.close(lock_fd)
+        return
     try: cleanup()
     finally: os.close(lock_fd)
 
 
 def child(name, parent_pid, parent_start, args):
-    if name not in ('supplicant', 'dhcp'): raise ValueError('Unknown WLAN child')
+    if name not in ('supplicant', 'dhcp', 'mutation'): raise ValueError('Unknown WLAN child')
     write_json(ROOT / (name + '.json'), {'pid': os.getpid(), 'start': token(os.getpid())})
     if ((ROOT / 'stop').exists() or (ROOT / 'cleaning').exists()
             or not alive({'pid': parent_pid, 'start': parent_start})):
@@ -220,9 +239,7 @@ def serve(parent_pid, parent_start):
                 for path, _ in owned: dbus.Interface(manager, 'fi.w1.wpa_supplicant1').RemoveInterface(path)
             pulse(); time.sleep(.1)
         if owned: raise RuntimeError('Native supplicant did not release USB')
-        mutate(['ip', 'netns', 'add', NS])
-        state['namespace_inode'] = Path('/run/netns/' + NS).stat().st_ino
-        write_json(ROOT / 'state.json', state)
+        owned_netns.create(ROOT, state, NS, pulse)
         for option in ('all', 'default'):
             mutate(['ip', 'netns', 'exec', NS, 'sysctl', '-qw', 'net.ipv6.conf.' + option + '.disable_ipv6=1'])
         # Rules exist before the radio can transmit DHCP or IP data.
