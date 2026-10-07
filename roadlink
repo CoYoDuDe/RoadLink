@@ -49,8 +49,10 @@ if args.command in ('configure-vpn', 'vpn-disable'):
         from wireguard import ensure_public_key
         ensure_public_key()
         try:
-            save({'enabled': args.enable, 'endpoint': args.endpoint, 'public_key': args.server_key,
-                  'address': args.address, 'dns': args.dns, 'port': args.port})
+            from vpn_providers import save_profile
+            save_profile({'enabled': args.enable, 'endpoint': args.endpoint, 'public_key': args.server_key,
+                          'address': args.address, 'dns': args.dns, 'port': args.port,
+                          'provider': 'custom'}, activate=True)
         except (ValueError, KeyError):
             parser.error('Ungültige VPN-Konfiguration')
         print('VPN gespeichert. Das Fahrzeug-WLAN erhält Internet, sobald Tunnel und DNS geprüft sind.')

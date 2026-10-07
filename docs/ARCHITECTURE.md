@@ -4,7 +4,7 @@ Diese Seite beschreibt den aktuellen Entwicklungsstand. Die kurze Bedienung steh
 
 ## VPN einrichten
 
-Der Server braucht WireGuard, einen registrierten Client-Schlüssel, Internetweiterleitung und einen DNS-Dienst im Tunnel. RoadLink richtet den Server derzeit nicht automatisch ein.
+DNSmith wird bei neuen Geräten automatisch eingerichtet. Einen eigenen WireGuard-Server wählst du unter **Internet und Umschaltung → VPN-Anbieter**, indem du **DNSmith-VPN** ausschaltest. Der eigene Server braucht einen registrierten Client-Schlüssel, Internetweiterleitung und einen DNS-Dienst im Tunnel. RoadLink richtet fremde Server nicht automatisch ein.
 
 Auf dem Venus-Gerät als root:
 
@@ -12,11 +12,13 @@ Auf dem Venus-Gerät als root:
 /data/RoadLink/roadlink vpn-public-key
 ```
 
-Den ausgegebenen **öffentlichen** Schlüssel am eigenen Server registrieren. Der private Schlüssel bleibt auf dem Gerät. Anschließend die Platzhalter durch die eigenen Daten ersetzen:
+Den ausgegebenen **öffentlichen** Schlüssel am eigenen Server registrieren. Der private Schlüssel bleibt auf dem Gerät. Die Felder lassen sich im Menü eintragen; alternativ die Platzhalter durch die eigenen Daten ersetzen:
 
 ```sh
 /data/RoadLink/roadlink configure-vpn --endpoint PUBLIC_IPV4 --server-key PUBLIC_KEY --address CLIENT_IPV4/32 --dns VPN_DNS --enable
 ```
+
+Dieser Befehl speichert und aktiviert den eigenen Anbieter. DNSmith bleibt als getrennte Konfiguration erhalten. Nach dem ersten Anbieterwechsel ist `wireguard/providers.json` maßgeblich; eine vorhandene `wireguard/config.json` bleibt unverändert. Zum Zurückwechseln **DNSmith-VPN** im Menü einschalten.
 
 Als Serveradresse wird eine öffentliche IPv4-Adresse benötigt. Die Client-Adresse ist eine einzelne private IPv4-Adresse mit `/32`; DNS muss im Tunnel erreichbar sein. Keine fremden Zugangsdaten übernehmen.
 

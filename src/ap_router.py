@@ -20,7 +20,9 @@ def plan(subnet, vpn):
     dns = ipaddress.ip_address(vpn['dns'])
     if (network.version != 4 or network.prefixlen != 24 or not network.is_private
             or address.version != 4 or address.network.prefixlen != 32
-            or not address.ip.is_private or dns.version != 4 or not dns.is_private
+            or not address.ip.is_private or dns.version != 4
+            or not (dns.is_global or any(dns in ipaddress.ip_network(net)
+                    for net in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')))
             or network.overlaps(address.network) or dns in network):
         raise ValueError('Invalid or overlapping AP/VPN addressing')
     return {'subnet': str(network), 'address': str(address.ip), 'dns': str(dns)}

@@ -45,8 +45,9 @@ def isolated_dhcp(interface, subnet, vpn_dns=None):
     options = 'dhcp-option=3\ndhcp-option=6\n'
     if vpn_dns is not None:
         dns = ipaddress.ip_address(vpn_dns)
-        if dns.version != 4 or not dns.is_private or dns in net:
-            raise ValueError('VPN DNS must be private IPv4 outside the AP subnet')
+        if (dns.version != 4 or not (dns.is_global or any(dns in ipaddress.ip_network(network)
+                for network in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))) or dns in net):
+            raise ValueError('VPN DNS must be usable IPv4 outside the AP subnet')
         options = 'dhcp-option=3,{}\ndhcp-option=6,{}\n'.format(net[1], dns)
     return ('interface={}\nbind-interfaces\nport=0\nno-resolv\nno-hosts\n'
             'dhcp-range={},{},255.255.255.0,{}\n{}'

@@ -5,7 +5,7 @@ import stat
 import sys
 from enrollment import enroll, EnrollmentError
 from storage import load_json, write_json
-from vpn_config import CONFIG, install_if_missing
+from vpn_config import CONFIG, install_if_missing, configured, enrollment_allowed
 from wireguard import KEY, ensure_public_key, validate_key
 
 ROOT = Path('/run/roadlink-enrollment')
@@ -51,14 +51,14 @@ def local_keys(path=KEY):
 
 
 def register(interface, permitted=lambda: True, path=CONFIG, keys=local_keys, request=enroll):
-    if Path(path).exists():
+    if configured(path):
         return 'EXISTING'
     if not permitted():
         return 'CANCELLED'
     private, public = keys()
     config = request(private, public, interface)
     return 'READY' if install_if_missing(config, path, permitted=permitted) else (
-        'EXISTING' if Path(path).exists() else 'CANCELLED')
+        'EXISTING' if configured(path) else 'CANCELLED')
 
 
 def main():
@@ -67,6 +67,7 @@ def main():
     def permitted():
         request = load_json(ROOT / 'request.json', {})
         return (identity_alive(pid, start) and request.get('enabled') is True
+                and enrollment_allowed()
                 and request.get('pid') == pid and request.get('start') == start
                 and (interface != 'disabledrlwan' or bootstrap_alive())
                 and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists())

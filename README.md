@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.17 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.18 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -28,6 +28,7 @@ Das Fahrzeug-WLAN heißt bei Neuinstallation **RoadLink**. Es gibt kein gemeinsa
 
 - Eigenes Fahrzeug-WLAN mit WPA2 und getrennten WLAN-Clients.
 - Automatische kostenlose DNSmith-VPN-Einrichtung ohne Konto. Jeder Pi erzeugt seinen eigenen Schlüssel; der private Schlüssel bleibt auf dem Gerät. Die Erstverbindung über USB-WLAN erlaubt ausschließlich DHCP und die festgelegten HTTPS-Ziele für Einrichtung und Internetprüfung. Fahrzeuggeräte erhalten dabei noch keinen Internetzugang.
+- Unter **Internet und Umschaltung → VPN-Anbieter** zwischen DNSmith und eigenem WireGuard-Server wechseln. Beide Konfigurationen bleiben lokal gespeichert. Für den eigenen Server den angezeigten Geräte-Public-Key dort registrieren und Serveradresse, Port, Server-Public-Key, Clientadresse und VPN-DNS eintragen.
 - Externe WLANs suchen, hinzufügen, bearbeiten und entfernen; WPA2 oder offen.
 - Gespeicherte, freigegebene WLANs automatisch verbinden; Priorität selbst festlegen.
 - Optional unbekannte offene WLANs automatisch suchen und prüfen. Der Schalter startet ausgeschaltet. Erst nach bestätigtem VPN-, DNS- und Internetzugang über dieses WLAN wird es als bekanntes Netz gespeichert. Fehlgeschlagene Netze werden mit Wartezeit erneut geprüft.
@@ -47,7 +48,9 @@ Der Pi vergibt im Fahrzeug-WLAN eigene IP-Adressen per DHCP. Das externe WLAN wi
 
 Der VPN-Tunnel führt vom Pi zu einem externen WireGuard-Server. DNSmith ist der Standardanbieter und stellt jedem automatisch eingerichteten Gerät einen eigenen Zugang bereit. Der Server sperrt Verbindungen zu anderen VPN-Teilnehmern, privaten Netzen und seinen Verwaltungsdiensten. Ein rein lokaler VPN auf dem Pi ersetzt diese Gegenstelle nicht.
 
-Geplant sind zwei getrennte Schalter: **DNSmith-VPN** und **DNSmith-DNS**, beide als Standard aktiviert. Bei Abwahl erscheinen die Felder für einen eigenen VPN-Anbieter beziehungsweise primären und sekundären DNS. Diese Anbieterwahl ist noch nicht verfügbar. Der vorhandene Schalter **DNSmith automatisch einrichten** steuert nur die erstmalige Registrierung; Ausschalten beendet keinen bereits eingerichteten Tunnel. Eine eigene Serverkonfiguration lässt sich derzeit über die [technische Anleitung](docs/ARCHITECTURE.md) einrichten.
+**DNSmith-VPN** ist standardmäßig ausgewählt. Ausschalten wählt einen eigenen WireGuard-Server und zeigt dessen Felder. Ohne gespeicherte eigene Konfiguration bleibt das Fahrzeug-Internet gesperrt. Zurückschalten stellt die DNSmith-Konfiguration wieder her; bei einem neuen Gerät wird sie automatisch eingerichtet. **DNSmith automatisch einrichten** steuert nur die Registrierung und beendet keinen vorhandenen Tunnel.
+
+Der getrennte Schalter **DNSmith-DNS** mit primärem und sekundärem DNS ist noch geplant. Ein eigener VPN kann bereits eine eigene IPv4-Adresse für seinen DNS verwenden. Eine unabhängige DNS-Auswahl beim DNSmith-VPN ist noch nicht verfügbar.
 
 Ein ausdrücklicher Modus **Internet ohne VPN** ist ebenfalls geplant. Auch dort müssen eigenes DHCP, NAT, Firewall und die Sperre neuer eingehender Zugriffe erhalten bleiben. Ohne VPN entfällt dessen Verschlüsselung gegenüber dem externen WLAN. **Dieser Modus ist noch nicht verfügbar:** VPN-Abschalten sperrt derzeit das Fahrzeug-Internet. Es gibt keinen stillen unverschlüsselten Rückfall.
 
@@ -66,7 +69,7 @@ WLAN-Anmeldeseiten, Geschwindigkeitsmessung und gelerntes Ranking, echte Bündel
 
 ## Updates und Entfernen
 
-Updates und Deinstallation laufen über SetupHelper. Eigene Zugangsdaten und Schlüssel liegen ausschließlich lokal unter `/data/setupOptions/RoadLink`, außerhalb des Pakets. Nach einer Deinstallation bleiben sie für eine spätere Neuinstallation erhalten. Tests sind kein Bestandteil des veröffentlichten Pakets.
+Updates und Deinstallation laufen über SetupHelper. Eigene Zugangsdaten und Schlüssel liegen ausschließlich lokal unter `/data/setupOptions/RoadLink`, außerhalb des Pakets. Nach dem ersten Anbieterwechsel liegen die VPN-Konfigurationen in `wireguard/providers.json`; eine vorhandene `wireguard/config.json` bleibt unverändert als Ausgangskonfiguration erhalten. Nach einer Deinstallation bleiben sie für eine spätere Neuinstallation erhalten. Tests sind kein Bestandteil des veröffentlichten Pakets.
 
 ## Unterstützung
 

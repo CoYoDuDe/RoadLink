@@ -3,6 +3,7 @@ import com.victron.velib 1.0
 MbPage {
     title: qsTr("RoadLink Internet")
     model: VisibleItemModel {
+        MbSubMenu { description: qsTr("VPN-Anbieter"); subpage: Component { PageRoadLinkVPN {} } }
         MbItemOptions {
             description: qsTr("Verbindungsmodus")
             bind: "com.victronenergy.settings/Settings/RoadLink/Wan/Mode"

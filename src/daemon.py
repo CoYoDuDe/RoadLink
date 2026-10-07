@@ -31,7 +31,9 @@ from vpn_runtime import ROOT as VPN_ROOT
 from wan_runtime import ROOT as WAN_ROOT
 from wan_config import client_name
 from enrollment_runtime import ROOT as ENROLLMENT_ROOT
-from vpn_config import CONFIG as VPN_CONFIG
+from vpn_config import configured as vpn_configured, enrollment_allowed
+from vpn_providers import selected as vpn_provider
+from vpn_provider_api import install as install_provider_api
 from enrollment_scheduler import EnrollmentSchedule
 
 
@@ -50,7 +52,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.17',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.18',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -95,6 +97,7 @@ def main():
                      onchangecallback=save_client_name)
     install_profile_api(service)
     install_scan_api(service)
+    install_provider_api(service)
     service.register()
     worker = None
     signature = None
@@ -129,7 +132,7 @@ def main():
             service['/WifiWan/ClientName'] = hostname
             wan_current = (repr(configuration), profiles_path.stat().st_mtime_ns
                            if profiles_path.exists() else 0, hostname, bool(settings['auto_open']),
-                           bool(settings['auto_enroll'])) if wan_requested else None
+                           bool(settings['auto_enroll']) and enrollment_allowed()) if wan_requested else None
             if wan_worker and wan_worker.poll() is not None:
                 wan_worker = None
                 wan_retry_at = time.monotonic() + 15
@@ -142,7 +145,8 @@ def main():
                     wan_worker = subprocess.Popen([sys.executable,
                         str(Path(__file__).with_name('wan_runtime.py')), 'serve',
                         str(os.getpid()), token(os.getpid()), hostname, str(int(settings['auto_open'])),
-                        str(int(bool(settings['auto_enroll']) and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()))])
+                        str(int(bool(settings['auto_enroll']) and enrollment_allowed()
+                                and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()))])
             if vpn_worker and vpn_worker.poll() is not None:
                 vpn_worker = None
                 vpn_retry_at = time.monotonic() + 15
@@ -161,10 +165,11 @@ def main():
                 'Tunnel und DNS bereit' if vpn_worker and vpn_state.get('state') == 'READY'
                 else 'Verbindet' if vpn_worker else 'Fehler: Bereinigung pruefen'
                 if vpn_state.get('state') == 'CLEANUP_FAILED' else 'Wartet' if vpn_requested else 'Aus')
-            service['/VPN/DNS'] = 'DNSmith erreichbar' if vpn_worker and vpn_state.get('dns_ready') else 'Nicht bereit'
+            service['/VPN/DNS'] = (('DNSmith erreichbar' if vpn_provider() == 'dnsmith' else 'VPN-DNS erreichbar')
+                                  if vpn_worker and vpn_state.get('dns_ready') else 'Nicht bereit')
             service['/Security'] = 'AP nur lokal'
             state = snapshot()
-            enrollment_requested = bool(settings['auto_enroll'] and not VPN_CONFIG.exists()
+            enrollment_requested = bool(settings['auto_enroll'] and enrollment_allowed()
                 and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists())
             if enrollment_requested or ENROLLMENT_ROOT.exists():
                 if ENROLLMENT_ROOT.is_symlink():
@@ -196,7 +201,8 @@ def main():
                     enrollment_command = ['ip', 'netns', 'exec', 'roadlink-wan', *enrollment_command]
                 enrollment_worker = subprocess.Popen(enrollment_command)
             enrollment_state = load_json(ENROLLMENT_ROOT / 'status.json', {})
-            service['/VPN/Enrollment'] = ('VPN-Einstellungen vorhanden' if VPN_CONFIG.exists() else
+            service['/VPN/Enrollment'] = ('VPN-Einstellungen vorhanden' if vpn_configured() else
+                'Eigenen VPN einrichten' if vpn_provider() == 'custom' else
                 'Automatische Einrichtung ausgeschaltet' if not settings['auto_enroll'] else
                 'Im Sicherheitsmodus angehalten' if Path('/data/setupOptions/RoadLink/SAFE_MODE').exists() else
                 'Wartet auf Internetzugang' if not native_enrollment_interface and not bootstrap_ready else
@@ -280,7 +286,8 @@ def main():
             ap_state = load_json(AP_ROOT / 'status.json', {})
             internet = bool(worker and ap_state.get('internet')
                             and vpn_worker and vpn_state.get('state') == 'READY')
-            service['/Security'] = 'AP ueber VPN, DNSmith' if internet else 'AP nur lokal'
+            service['/Security'] = ('AP ueber VPN, DNSmith' if vpn_provider() == 'dnsmith'
+                                   else 'AP ueber eigenen VPN') if internet else 'AP nur lokal'
             service['/AP/Status'] = ('Fehler: Diagnose pruefen' if failed else
                 ('Internet ueber VPN' if internet else 'Lokal, ohne Internet'
                  if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET') else 'Startet') if worker

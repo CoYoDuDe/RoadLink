@@ -24,7 +24,9 @@ def validate(value):
     if address.network.prefixlen != 32 or not private:
         raise ValueError('A single IPv4 client address is required')
     dns = ipaddress.IPv4Address(value['dns'])
-    if dns.is_multicast or dns.is_unspecified or dns == address.ip:
+    dns_private = any(dns in ipaddress.IPv4Network(net)
+                      for net in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
+    if not (dns.is_global or dns_private) or dns == address.ip:
         raise ValueError('Invalid VPN DNS address')
     mtu = value.get('mtu', 1380)
     if type(mtu) is not int or not 1280 <= mtu <= 1420:
@@ -40,8 +42,24 @@ def validate(value):
 
 
 def read(path=CONFIG):
+    if Path(path) == CONFIG:
+        from vpn_providers import current
+        return current()
     value = load_json(path)
     return validate(value) if value is not None else None
+
+
+def configured(path=CONFIG):
+    if Path(path) == CONFIG:
+        from vpn_providers import state
+        value = state()
+        return value['selected'] in value['profiles']
+    return Path(path).exists()
+
+
+def enrollment_allowed():
+    from vpn_providers import selected
+    return selected() == 'dnsmith' and not configured()
 
 
 @contextmanager
@@ -63,6 +81,12 @@ def locked(path):
 
 def save(value, path=CONFIG):
     config = validate(value)
+    if Path(path) == CONFIG:
+        from vpn_providers import STORE, save_profile, selected
+        if STORE.exists():
+            if not save_profile(dict(config, provider=config.get('provider', selected()))):
+                raise ValueError('VPN provider is not selected')
+            return
     with locked(path):
         write_json(path, config)
 
@@ -70,6 +94,9 @@ def save(value, path=CONFIG):
 def install_if_missing(value, path=CONFIG, permitted=lambda: True):
     """A delayed enrollment response must never overwrite user configuration."""
     config = validate(value)
+    if Path(path) == CONFIG:
+        from vpn_providers import save_profile
+        return save_profile(config, only_missing=True, permitted=permitted)
     with locked(path):
         if Path(path).exists() or not permitted():
             return False
