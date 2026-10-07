@@ -24,6 +24,7 @@ from ap_config import hostapd
 from secret_item import SecretItem
 from ap_runtime import ROOT as AP_ROOT, SECRET as AP_SECRET, token, alive
 from wifi import networks
+from profile_api import install as install_profile_api
 
 
 def main():
@@ -36,7 +37,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.3',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.4',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -62,6 +63,7 @@ def main():
 
     service.add_path('/AP/NewPassword', '', writeable=True,
                      onchangecallback=save_ap_password, itemtype=SecretItem)
+    install_profile_api(service)
     service.register()
     worker = None
     signature = None

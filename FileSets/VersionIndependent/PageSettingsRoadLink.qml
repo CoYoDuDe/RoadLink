@@ -6,6 +6,8 @@ MbPage {
     title: qsTr("RoadLink")
     model: VisibleItemModel {
         MbSubMenu { description: qsTr("Fahrzeug-WLAN"); subpage: Component { PageRoadLinkAP {} } }
+        MbSubMenu { description: qsTr("Externes WLAN hinzufuegen"); subpage: Component { PageRoadLinkWifiAdd {} } }
+        MbSubMenu { description: qsTr("Gespeicherte WLANs"); subpage: Component { PageRoadLinkWifiProfiles {} } }
         MbItemValue { description: qsTr("Aktueller WAN-Pfad"); item.bind: "com.coyodude.roadlink/Wan/Active" }
         MbItemValue { description: qsTr("Verbundenes WLAN"); item.bind: "com.coyodude.roadlink/WifiWan/SSID" }
         MbItemValue { description: qsTr("Internetstatus"); item.bind: "com.coyodude.roadlink/Wan/Health" }

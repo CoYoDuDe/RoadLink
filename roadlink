@@ -12,12 +12,41 @@ from status import snapshot
 from hardware import capabilities
 from storage import load_json, write_json
 from ap_config import hostapd
+from profiles import Profiles
 
 parser = argparse.ArgumentParser(description='RoadLink network diagnostics')
-parser.add_argument('command', choices=['status', 'hardware', 'diagnostics', 'configure-ap', 'ap-status', 'safe-mode'])
+parser.add_argument('command', choices=['status', 'hardware', 'diagnostics', 'configure-ap', 'ap-status', 'safe-mode',
+                                      'wifi-list', 'wifi-save', 'wifi-forget'])
 parser.add_argument('--ssid', default='breschdleng-roadlink')
 parser.add_argument('--generate', action='store_true', help='Generate a private AP password on this device')
+parser.add_argument('--security', choices=['psk', 'open'], default='psk')
+parser.add_argument('--priority', type=int, default=50)
+parser.add_argument('--autoconnect', action='store_true')
+parser.add_argument('--id', dest='profile_id')
 args = parser.parse_args()
+if args.command.startswith('wifi-'):
+    if os.geteuid() != 0:
+        parser.error('Root required')
+    profiles = Profiles()
+    if args.command == 'wifi-save':
+        # An explicit SSID is required; the AP default must never become an
+        # unintended external WLAN profile.
+        if '--ssid' not in sys.argv:
+            parser.error('--ssid is required')
+        password = getpass.getpass('Externes WLAN-Passwort (leer: bisheriges behalten): ') if args.security == 'psk' else ''
+        try:
+            identifier = profiles.save(args.ssid, args.security, password, args.priority, args.autoconnect)
+        except ValueError as error:
+            parser.error(str(error))
+        print('Profile saved: ' + identifier + '. Connection awaits the protected WAN controller.')
+    elif args.command == 'wifi-forget':
+        if not args.profile_id:
+            parser.error('--id is required')
+        profiles.forget(args.profile_id)
+        print('Profile removed.')
+    else:
+        print(json.dumps(profiles.metadata(), ensure_ascii=False, indent=2))
+    sys.exit(0)
 if args.command == 'configure-ap':
     if os.geteuid() != 0:
         parser.error('Root required')

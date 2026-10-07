@@ -1,6 +1,6 @@
 # RoadLink
 
-Venus OS networking addon using kwindrem SetupHelper. **Development release v0.3: diagnostics and an isolated local vehicle AP with native password entry.**
+Venus OS networking addon using kwindrem SetupHelper. **Development release v0.4: local AP and native external-WLAN profile management.**
 
 The native GUI at Settings → RoadLink shows the default WAN interface, connected USB WLAN and explicit Internet/failover/protection limits. Its vehicle-WLAN page controls the AP and its SSID and shows its local address. `/data/RoadLink/roadlink status`, `hardware` and `diagnostics` provide diagnostics.
 
@@ -14,6 +14,8 @@ An independent AP guard cleans up owned processes, interface and firewall rules 
 
 The vehicle-WLAN page includes masked password entry (8–63 printable ASCII characters). Saving restarts the vehicle AP and disconnects its clients. The write-only password BusItem never publishes its submitted value through GetValue, GetItems or change signals; only a result status is exposed. The existing password is never shown. Native Ethernet settings remain available for recovery. Native Wi-Fi settings remain unchanged until RoadLink can safely take full ownership of external WLAN management.
 
-Pending: WLAN profile management in the GUI, known-WLAN automatic connections, Ethernet/WLAN switching, DNSmith/WireGuard enforcement, captive portals, client management and complete UI. No bandwidth bonding is active. Never interpret link carrier or the default route as a successful Internet/security check.
+External-WLAN profiles can be added by SSID, listed and forgotten in RoadLink's native GUI. Profiles include WPA/WPA2 or open security, priority 0–100 and the intended autoconnect setting. Resaving the same SSID/security updates it; leaving the password blank preserves an existing password. Enter the password after selecting the SSID/security, then save within 60 seconds. Password inputs stay write-only and expire from memory. Profiles persist privately outside the package, with a stable derived MAC assigned per profile and VPN required. These are stored settings: automatic association and MAC/VPN enforcement are not yet active. The GUI explicitly reports this limitation. CLI commands `wifi-list`, `wifi-save --ssid NAME` and `wifi-forget --id ID` use the same store; passwords use a hidden prompt.
+
+Pending: WLAN scan-and-select, direct editing of existing profiles, known-WLAN automatic connections, Ethernet/WLAN switching, DNSmith/WireGuard enforcement, captive portals, client management and complete UI. No bandwidth bonding is active. Never interpret link carrier or the default route as a successful Internet/security check.
 
 Tests stay outside this repository and device packages. See `docs/ARCHITECTURE.md` for integration constraints.
