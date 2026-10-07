@@ -34,6 +34,8 @@ from enrollment_runtime import ROOT as ENROLLMENT_ROOT
 from vpn_config import configured as vpn_configured, enrollment_allowed
 from vpn_providers import selected as vpn_provider
 from vpn_provider_api import install as install_provider_api
+from dns_config import read as dns_settings, routed as routed_dns, ready as dns_ready
+from dns_api import install as install_dns_api
 from enrollment_scheduler import EnrollmentSchedule
 
 
@@ -52,7 +54,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.18',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.19',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -98,6 +100,7 @@ def main():
     install_profile_api(service)
     install_scan_api(service)
     install_provider_api(service)
+    install_dns_api(service)
     service.register()
     worker = None
     signature = None
@@ -161,11 +164,13 @@ def main():
                         str(Path(__file__).with_name('vpn_runtime.py')), 'serve',
                         str(os.getpid()), token(os.getpid())])
             vpn_state = load_json(VPN_ROOT / 'status.json', {})
+            service['/DNS/Provider'] = 'DNSmith' if dns_settings()['dnsmith'] else 'Eigener DNS'
+            service['/DNS/Active'] = vpn_state['dns'] if vpn_worker and dns_ready(configuration, vpn_state) else 'Nicht bereit'
             service['/VPN/Status'] = ('Konfiguration ungueltig' if vpn_invalid else
                 'Tunnel und DNS bereit' if vpn_worker and vpn_state.get('state') == 'READY'
                 else 'Verbindet' if vpn_worker else 'Fehler: Bereinigung pruefen'
                 if vpn_state.get('state') == 'CLEANUP_FAILED' else 'Wartet' if vpn_requested else 'Aus')
-            service['/VPN/DNS'] = (('DNSmith erreichbar' if vpn_provider() == 'dnsmith' else 'VPN-DNS erreichbar')
+            service['/VPN/DNS'] = (('DNSmith erreichbar' if dns_settings()['dnsmith'] else 'Eigener DNS erreichbar')
                                   if vpn_worker and vpn_state.get('dns_ready') else 'Nicht bereit')
             service['/Security'] = 'AP nur lokal'
             state = snapshot()
@@ -264,7 +269,7 @@ def main():
                 service['/Wan/Health'] = 'VPN-Internet und DNS geprueft' if vpn_state.get('internet') else 'VPN-Internet nicht bereit'
             requested = (bool(settings['ap_enabled']), str(settings['ap_ssid']),
                          AP_SECRET.stat().st_mtime_ns if AP_SECRET.exists() else 0,
-                         repr(configuration))
+                         repr(routed_dns(configuration, vpn_state)))
             if (Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()):
                 requested = (False, *requested[1:])
             if requested != signature:
@@ -286,8 +291,8 @@ def main():
             ap_state = load_json(AP_ROOT / 'status.json', {})
             internet = bool(worker and ap_state.get('internet')
                             and vpn_worker and vpn_state.get('state') == 'READY')
-            service['/Security'] = ('AP ueber VPN, DNSmith' if vpn_provider() == 'dnsmith'
-                                   else 'AP ueber eigenen VPN') if internet else 'AP nur lokal'
+            service['/Security'] = ('AP ueber VPN, DNSmith' if dns_settings()['dnsmith']
+                                   else 'AP ueber VPN, eigenen DNS') if internet else 'AP nur lokal'
             service['/AP/Status'] = ('Fehler: Diagnose pruefen' if failed else
                 ('Internet ueber VPN' if internet else 'Lokal, ohne Internet'
                  if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET') else 'Startet') if worker

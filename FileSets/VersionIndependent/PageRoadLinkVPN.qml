@@ -13,7 +13,7 @@ MbPage {
         MbEditBox { description: qsTr("Server-Port"); item.bind: "com.coyodude.roadlink/VPN/Custom/Port"; maximumLength: 5; numericOnlyLayout: true; show: useDNSmith.value === 0; writeAccessLevel: User.AccessInstaller }
         MbEditBox { description: qsTr("Server-Public-Key"); item.bind: "com.coyodude.roadlink/VPN/Custom/ServerKey"; maximumLength: 44; show: useDNSmith.value === 0; writeAccessLevel: User.AccessInstaller }
         MbEditBox { description: qsTr("Client IPv4/32"); item.bind: "com.coyodude.roadlink/VPN/Custom/Address"; maximumLength: 18; show: useDNSmith.value === 0; writeAccessLevel: User.AccessInstaller }
-        MbEditBox { description: qsTr("VPN-DNS IPv4"); item.bind: "com.coyodude.roadlink/VPN/Custom/DNS"; maximumLength: 15; show: useDNSmith.value === 0; writeAccessLevel: User.AccessInstaller }
+        MbEditBox { description: qsTr("Profil-DNS IPv4"); item.bind: "com.coyodude.roadlink/VPN/Custom/DNS"; maximumLength: 15; show: useDNSmith.value === 0; writeAccessLevel: User.AccessInstaller }
         MbEditBox { description: qsTr("MTU 1280-1420"); item.bind: "com.coyodude.roadlink/VPN/Custom/MTU"; maximumLength: 4; numericOnlyLayout: true; show: useDNSmith.value === 0; writeAccessLevel: User.AccessInstaller }
         MbItemOptions {
             description: qsTr("Eigene Einstellungen speichern")
@@ -32,6 +32,7 @@ MbPage {
         MbItemText { text: String(deviceKey.value || "").substring(0, 22); show: useDNSmith.value === 0 && deviceKey.value !== "" }
         MbItemText { text: String(deviceKey.value || "").substring(22); show: useDNSmith.value === 0 && deviceKey.value !== "" }
         MbItemText { text: qsTr("Public Key am Server eintragen."); show: useDNSmith.value === 0 }
+        MbItemText { text: qsTr("Aktiven DNS unter DNS-Anbieter waehlen."); show: useDNSmith.value === 0 }
         MbItemText { text: qsTr("Ohne VPN kein Fahrzeug-Internet."); show: useDNSmith.value === 0 }
         MbItemText { text: qsTr("Beide Anbieter bleiben gespeichert.") }
         MbItemText { text: qsTr("DNSmith.net: kostenlos"); show: useDNSmith.value === 1 }

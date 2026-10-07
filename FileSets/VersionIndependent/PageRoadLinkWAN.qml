@@ -4,6 +4,7 @@ MbPage {
     title: qsTr("RoadLink Internet")
     model: VisibleItemModel {
         MbSubMenu { description: qsTr("VPN-Anbieter"); subpage: Component { PageRoadLinkVPN {} } }
+        MbSubMenu { description: qsTr("DNS-Anbieter"); subpage: Component { PageRoadLinkDNS {} } }
         MbItemOptions {
             description: qsTr("Verbindungsmodus")
             bind: "com.victronenergy.settings/Settings/RoadLink/Wan/Mode"

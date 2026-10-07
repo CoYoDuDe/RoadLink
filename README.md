@@ -50,7 +50,9 @@ Der VPN-Tunnel führt vom Pi zu einem externen WireGuard-Server. DNSmith ist der
 
 **DNSmith-VPN** ist standardmäßig ausgewählt. Ausschalten wählt einen eigenen WireGuard-Server und zeigt dessen Felder. Ohne gespeicherte eigene Konfiguration bleibt das Fahrzeug-Internet gesperrt. Zurückschalten stellt die DNSmith-Konfiguration wieder her; bei einem neuen Gerät wird sie automatisch eingerichtet. **DNSmith automatisch einrichten** steuert nur die Registrierung und beendet keinen vorhandenen Tunnel.
 
-Der getrennte Schalter **DNSmith-DNS** mit primärem und sekundärem DNS ist noch geplant. Ein eigener VPN kann bereits eine eigene IPv4-Adresse für seinen DNS verwenden. Eine unabhängige DNS-Auswahl beim DNSmith-VPN ist noch nicht verfügbar.
+Unter **Internet und Umschaltung → DNS-Anbieter** ist **DNSmith-DNS** standardmäßig eingeschaltet. Ausschalten zeigt die Felder für einen eigenen öffentlichen IPv4-DNS und einen optionalen zweiten DNS. Neue Adressen erst speichern; bis dahin bleibt der bisherige Anbieter aktiv. Beide DNS-Adressen werden durch den VPN geprüft. Antwortet der erste nicht, wird der zweite verwendet. Beim Wechsel startet das Fahrzeug-WLAN neu, damit Firewall und DHCP dieselbe DNS-Adresse verwenden. Ohne erreichbaren DNS wird kein Internet als bereit angezeigt. Zurückschalten erhält die eigenen gespeicherten Adressen.
+
+Die DNS-Auswahl gilt unabhängig vom VPN-Anbieter. Mit DNSmith-VPN wird der interne DNSmith-Resolver verwendet; mit einem anderen VPN wird DNSmith über seine öffentliche Adresse erreicht. Der Profil-DNS im eigenen VPN bleibt als ursprüngliche Serverangabe gespeichert; den tatsächlich verwendeten DNS legt das Menü **DNS-Anbieter** fest.
 
 Ein ausdrücklicher Modus **Internet ohne VPN** ist ebenfalls geplant. Auch dort müssen eigenes DHCP, NAT, Firewall und die Sperre neuer eingehender Zugriffe erhalten bleiben. Ohne VPN entfällt dessen Verschlüsselung gegenüber dem externen WLAN. **Dieser Modus ist noch nicht verfügbar:** VPN-Abschalten sperrt derzeit das Fahrzeug-Internet. Es gibt keinen stillen unverschlüsselten Rückfall.
 

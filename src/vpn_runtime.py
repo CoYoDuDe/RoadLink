@@ -5,8 +5,6 @@ import ipaddress
 import os
 from pathlib import Path
 import signal
-import socket
-import struct
 import subprocess
 import sys
 import time
@@ -18,6 +16,7 @@ import vpn_transport
 from wan_bridge import MARK
 from wan_health import probe as https_probe
 from policy import Selector, Link, MODES
+from dns_health import choose as choose_dns
 
 ROOT = Path('/run/roadlink-vpn')
 INTERFACE = 'wgroadlink'
@@ -113,23 +112,6 @@ def stop():
     raise RuntimeError('VPN cleanup incomplete; refusing package changes')
 
 
-def dns_probe(config):
-    question = b'\x07example\x03com\x00' + struct.pack('!HH', 1, 1)
-    identifier = int.from_bytes(os.urandom(2), 'big')
-    packet = struct.pack('!6H', identifier, 0x0100, 1, 0, 0, 0) + question
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.settimeout(2)
-            sock.bind((str(ipaddress.IPv4Interface(config['address']).ip), 0))
-            sock.connect((config['dns'], 53))
-            sock.send(packet)
-            response = sock.recv(4096)
-        ident, flags, _, answers, _, _ = struct.unpack('!6H', response[:12])
-        return ident == identifier and bool(flags & 0x8000) and flags & 15 == 0 and answers > 0
-    except (OSError, struct.error):
-        return False
-
-
 def serve(parent_pid, parent_start):
     if os.geteuid() != 0:
         raise PermissionError('Root required')
@@ -187,6 +169,7 @@ def serve(parent_pid, parent_start):
     command(['ip', 'link', 'set', INTERFACE, 'mtu', str(config['mtu']), 'up'])
     command(['ip', 'route', 'add', 'default', 'dev', INTERFACE, 'metric', '10', 'table', TABLE])
     last_probe, dns_ready = float('-inf'), False
+    active_dns = None
     selection = Selector(recoveries=1, failures=2)
     active, selected_route = None, None
     penalties = {'ethernet': 0, 'wifi': 0}
@@ -234,7 +217,8 @@ def serve(parent_pid, parent_start):
                 command(['wg', 'set', INTERFACE, 'peer', config['public_key'], 'allowed-ips', '0.0.0.0/0',
                          'endpoint', config['endpoint'] + ':' + str(config['port']), 'persistent-keepalive', '15'])
                 active, selected_route, dns_ready, dns_failures = desired, route, False, 0
-            dns_ready, last_probe = dns_probe(config), time.monotonic()
+            active_dns = choose_dns(config)
+            dns_ready, last_probe = bool(active_dns), time.monotonic()
             atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
             tunnel_https = https_probe(INTERFACE, str(ipaddress.IPv4Interface(config['address']).ip))['healthy'] if dns_ready else False
             dns_failures = 0 if dns_ready else dns_failures + 1
@@ -247,7 +231,7 @@ def serve(parent_pid, parent_start):
         write_json(ROOT / 'status.json', {'state': 'READY' if fresh and dns_ready and tunnel_https else 'CONNECTING',
                    'dns_ready': bool(fresh and dns_ready), 'internet': bool(fresh and dns_ready and tunnel_https),
                    'handshake': handshake, 'endpoint': config['endpoint'],
-                   'address': config['address'], 'dns': config['dns'], 'wan': active or '', 'health': health,
+                   'address': config['address'], 'dns': active_dns or '', 'wan': active or '', 'health': health,
                    'mode': mode, 'wifi_profile_id': (selected_route or {}).get('profile_id', '') if active == 'wifi' else '',
                    'wifi_penalty_profile': wifi_penalty_profile,
                    'penalties': {key: time.monotonic() < expiry for key, expiry in penalties.items()}})

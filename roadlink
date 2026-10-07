@@ -39,7 +39,8 @@ if args.command in ('configure-vpn', 'vpn-disable'):
         parser.error('Root-Rechte erforderlich')
     from vpn_config import read, save
     if args.command == 'vpn-disable':
-        value = read()
+        from vpn_providers import current
+        value = current()
         if value:
             save(dict(value, enabled=False))
         print('VPN wird ausgeschaltet. Der normale Gerätezugang bleibt erhalten.')

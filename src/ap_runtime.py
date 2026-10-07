@@ -13,6 +13,7 @@ from ap_config import hostapd, isolated_dhcp, choose_subnet
 from hardware import inspect_interfaces, resolve_role
 from storage import atomic_write, load_json, write_json
 from vpn_config import read as vpn_config
+from dns_config import routed as routed_dns, ready as dns_ready
 import ap_router
 
 ROOT = Path('/run/roadlink-ap')
@@ -182,7 +183,8 @@ def serve(ssid, parent_pid, parent_start):
     subnet = choose_subnet([r['dst'] for r in routes if r.get('dst') not in (None, 'default')])
     address = str(ipaddress.ip_network(subnet)[1])
     vpn = vpn_config()
-    routing = ap_router.plan(subnet, vpn) if vpn and vpn['enabled'] else None
+    vpn_status = load_json(Path('/run/roadlink-vpn/status.json'), {})
+    routing = ap_router.plan(subnet, routed_dns(vpn, vpn_status)) if vpn and vpn['enabled'] else None
     config += 'ctrl_interface=' + str(ROOT / 'control') + '\n'
     atomic_write(ROOT / 'hostapd.conf', config.encode())
     dhcp = isolated_dhcp(INTERFACE, subnet).replace('/run/roadlink/ap.leases', str(ROOT / 'leases'))
@@ -210,7 +212,8 @@ def serve(ssid, parent_pid, parent_start):
     if routing:
         ap_router.start(ROOT, routing, command)
     initial_vpn = load_json(Path('/run/roadlink-vpn/status.json'), {})
-    advertised_dns = (routing['dns'] if routing and initial_vpn.get('state') == 'READY'
+    advertised_dns = (routing['dns'] if routing and dns_ready(vpn, initial_vpn)
+                      and routing['dns'] == initial_vpn.get('dns')
                       and alive(load_json(Path('/run/roadlink-vpn/controller.json'), {}))
                       and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {})) else None)
     if advertised_dns:
@@ -236,7 +239,8 @@ def serve(ssid, parent_pid, parent_start):
             vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
             if routing:
                 ap_router.reconcile(command)
-            internet = bool(ready and routing and vpn_state.get('state') == 'READY'
+            internet = bool(ready and routing and dns_ready(vpn, vpn_state)
+                            and routing['dns'] == vpn_state.get('dns')
                             and alive(load_json(Path('/run/roadlink-vpn/controller.json'), {}))
                             and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {})))
             desired_dns = routing['dns'] if internet else None

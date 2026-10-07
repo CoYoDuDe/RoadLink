@@ -13,7 +13,7 @@ def validate(value):
     if not isinstance(value, dict) or type(value.get('enabled')) is not bool:
         raise ValueError('VPN enabled must be boolean')
     endpoint = ipaddress.IPv4Address(value['endpoint'])
-    if not endpoint.is_global:
+    if not endpoint.is_global or endpoint.is_multicast or endpoint.is_reserved:
         raise ValueError('VPN endpoint must be a public IPv4 address')
     port = value.get('port', 51820)
     if type(port) is not int or not 1 <= port <= 65535:
@@ -26,7 +26,7 @@ def validate(value):
     dns = ipaddress.IPv4Address(value['dns'])
     dns_private = any(dns in ipaddress.IPv4Network(net)
                       for net in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
-    if not (dns.is_global or dns_private) or dns == address.ip:
+    if not (dns.is_global or dns_private) or dns.is_multicast or dns.is_reserved or dns == address.ip:
         raise ValueError('Invalid VPN DNS address')
     mtu = value.get('mtu', 1380)
     if type(mtu) is not int or not 1280 <= mtu <= 1420:
@@ -43,8 +43,9 @@ def validate(value):
 
 def read(path=CONFIG):
     if Path(path) == CONFIG:
-        from vpn_providers import current
-        return current()
+        from vpn_providers import current, selected
+        from dns_config import effective, read as dns_settings
+        return effective(current(), selected(), dns_settings())
     value = load_json(path)
     return validate(value) if value is not None else None
 
