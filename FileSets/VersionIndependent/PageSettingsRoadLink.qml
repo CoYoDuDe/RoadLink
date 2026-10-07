@@ -10,6 +10,18 @@ MbPage {
         MbSubMenu { description: qsTr("Gespeicherte WLANs"); subpage: Component { PageRoadLinkWifiProfiles {} } }
         MbSwitch { name: qsTr("USB-WLAN-Reserve aktivieren"); bind: "com.victronenergy.settings/Settings/RoadLink/WifiWan/Enabled" }
         MbItemValue { description: qsTr("USB-WLAN-Verbindung"); item.bind: "com.coyodude.roadlink/WifiWan/StateText" }
+        MbItemOptions {
+            description: qsTr("WAN-Modus")
+            bind: "com.victronenergy.settings/Settings/RoadLink/Wan/Mode"
+            possibleValues: [
+                MbOption { description: qsTr("Automatisch"); value: "AUTO" },
+                MbOption { description: qsTr("Starlink bevorzugen"); value: "PREFER_STARLINK" },
+                MbOption { description: qsTr("WLAN bevorzugen"); value: "PREFER_WIFI" },
+                MbOption { description: qsTr("Bessere Verbindung"); value: "BEST_CONNECTION" },
+                MbOption { description: qsTr("Nur Starlink"); value: "STARLINK_ONLY" },
+                MbOption { description: qsTr("Nur WLAN"); value: "WIFI_ONLY" }
+            ]
+        }
         MbItemValue { description: qsTr("Aktueller WAN-Pfad"); item.bind: "com.coyodude.roadlink/Wan/Active" }
         MbItemValue { description: qsTr("Verbundenes WLAN"); item.bind: "com.coyodude.roadlink/WifiWan/SSID" }
         MbItemValue { description: qsTr("Internetstatus"); item.bind: "com.coyodude.roadlink/Wan/Health" }

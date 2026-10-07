@@ -56,6 +56,10 @@ def rules(config, scope):
                + tag + ['-j', 'ACCEPT'])
         yield ('filter', 'INPUT', ['-i', RADIO, '-p', 'udp', '--sport', '67', '--dport', '68']
                + tag + ['-j', 'ACCEPT'])
+        yield ('filter', 'OUTPUT', ['-o', RADIO, '-d', '1.1.1.1', '-p', 'tcp', '--dport', '443']
+               + tag + ['-j', 'ACCEPT'])
+        yield ('filter', 'INPUT', ['-i', RADIO, '-s', '1.1.1.1', '-p', 'tcp', '--sport', '443']
+               + established + tag + ['-j', 'ACCEPT'])
         yield ('filter', 'FORWARD', ['-i', PEER, '-o', RADIO, '-s', config['host'],
                '-d', endpoint, '-p', 'udp', '--dport', port] + tag + ['-j', 'ACCEPT'])
         yield ('filter', 'FORWARD', ['-i', RADIO, '-o', PEER, '-d', config['host'],

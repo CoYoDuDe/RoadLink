@@ -1,5 +1,13 @@
 # Network integration findings
 
+## Active WAN transport (v0.10)
+
+The permanent USB worker creates an owned, down-first veth pair, installs host restrictions before raising it and explicitly sets/verifies the ownership alias: the Pi kernel ignored the alias supplied during veth creation. Its guard deletes the host link before removing its firewall. The VPN guard owns table 51910 and exact full-mask fwmark rule 21790; these survive WLAN-link deletion as an unreachable default until WireGuard itself is removed. Only an endpoint /32 route is selected. The ordinary host default remains unchanged. Private transit candidates are checked against existing root IPv4 routes, and DHCP rejects a transit/lease overlap. A nonzero global reverse-path filter is currently refused rather than changing native global settings.
+
+Namespace-local verified HTTPS to fixed 1.1.1.1:443 is an explicit health exception. It does not permit host HTTPS forwarding or general namespace output. Per-path HTTPS, tunnel DNS and tunnel HTTPS distinguish association from usable encrypted Internet. A peer is recreated on path change to discard its cached outer source address. Six GUI modes use the shared selector, failure/recovery thresholds and failback hysteresis. Two tunnel DNS failures temporarily exclude the current path. BEST_CONNECTION uses latency only; bandwidth, durable learning, captive-portal handling, automatic unknown-open association and acceleration are pending.
+
+The earlier implementation records below describe their release boundaries; v0.10 replaces the earlier statements that permanent WLAN routing and WAN selection are inactive. Lifecycle and packet verification remain essential. A precisely timed kill between veth creation and explicit alias assignment may retain a down link with firewall restrictions because cleanup refuses untagged ownership; hardening this journal window remains pending, alongside the namespace-creation window described below.
+
 Observed on a Raspberry Pi 4 running Venus OS v3.81, 2026-10-06.
 
 - Venus owns ConnMan 1.33, the system wpa_supplicant and a loopback-only dnsmasq 2.90. ConnMan stores profiles under `/data/var/lib/connman`.

@@ -38,10 +38,11 @@ def main():
         'ap_enabled': ['/Settings/RoadLink/AP/Enabled', 0, 0, 1],
         'ap_ssid': ['/Settings/RoadLink/AP/SSID', 'breschdleng-roadlink', 0, 0],
         'wan_enabled': ['/Settings/RoadLink/WifiWan/Enabled', 0, 0, 1],
+        'wan_mode': ['/Settings/RoadLink/Wan/Mode', 'AUTO', 0, 0],
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.9',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.10',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -171,6 +172,15 @@ def main():
                 'ambiguous': 'Mehrere Funkmodule', 'idle': 'Nicht verbunden',
                 'online': 'Verbunden', 'ready': 'Verbunden', 'unavailable': 'Nicht verfuegbar',
             }.get(str(service['/WifiWan/State']), 'Nicht verbunden')
+            if 'wan' in vpn_state:
+                active = vpn_state['wan']
+                service['/Wan/Active'] = {'ethernet': 'Ethernet / Starlink', 'wifi': 'USB-WLAN'}.get(active, 'Kein geeigneter WAN-Pfad')
+                service['/Wan/Reason'] = ('Ethernet-Tunnel nicht erreichbar, WLAN aktiv'
+                    if active == 'wifi' and vpn_state.get('penalties', {}).get('ethernet') else
+                    'Ethernet nicht erreichbar, WLAN aktiv' if active == 'wifi' and not vpn_state.get('health', {}).get('ethernet', {}).get('healthy') else
+                    'VPN ueber bekanntes WLAN' if active == 'wifi' else 'VPN ueber Ethernet / Starlink'
+                    if active == 'ethernet' else 'Wartet auf geeignete Verbindung')
+                service['/Wan/Health'] = 'VPN-Internet und DNS geprueft' if vpn_state.get('internet') else 'VPN-Internet nicht bereit'
             requested = (bool(settings['ap_enabled']), str(settings['ap_ssid']),
                          AP_SECRET.stat().st_mtime_ns if AP_SECRET.exists() else 0,
                          repr(configuration))

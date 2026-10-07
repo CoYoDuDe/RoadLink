@@ -14,6 +14,10 @@ from ap_runtime import command, token, alive
 from storage import atomic_write, load_json, write_json
 from vpn_config import read
 from wireguard import KEY, ensure_public_key
+import vpn_transport
+from wan_bridge import MARK
+from wan_health import probe as https_probe
+from policy import Selector, Link, MODES
 
 ROOT = Path('/run/roadlink-vpn')
 INTERFACE = 'wgroadlink'
@@ -55,6 +59,7 @@ def cleanup():
                 if device.exists():
                     errors.append('VPN interface removal failed; firewall retained')
         if not errors:
+            errors.extend(vpn_transport.cleanup(ROOT, command))
             command(['ip', 'rule', 'del', 'priority', PRIORITY, 'from', state['config']['address'],
                      'lookup', TABLE], check=False)
             command(['ip', 'route', 'del', 'unreachable', 'default', 'metric', '32767',
@@ -170,30 +175,78 @@ def serve(parent_pid, parent_start):
         command([rule[0], '-w', '3', '-I', rule[1], '1', *rule[2:]])
     command(['ip', 'route', 'add', 'unreachable', 'default', 'metric', '32767', 'table', TABLE])
     command(['ip', 'rule', 'add', 'priority', PRIORITY, 'from', config['address'], 'lookup', TABLE])
+    vpn_transport.start(ROOT, config, command)
     command(['ip', 'link', 'add', INTERFACE, 'type', 'wireguard'])
     command(['ip', 'link', 'set', INTERFACE, 'alias', ALIAS])
     Path('/proc/sys/net/ipv6/conf/' + INTERFACE + '/disable_ipv6').write_text('1\n')
     command(['wg', 'set', INTERFACE, 'private-key', str(KEY), 'peer', config['public_key'],
              'allowed-ips', '0.0.0.0/0', 'endpoint', config['endpoint'] + ':' + str(config['port']),
              'persistent-keepalive', '15'])
+    command(['wg', 'set', INTERFACE, 'fwmark', MARK])
     command(['ip', 'addr', 'add', config['address'], 'dev', INTERFACE])
     command(['ip', 'link', 'set', INTERFACE, 'mtu', str(config['mtu']), 'up'])
     command(['ip', 'route', 'add', 'default', 'dev', INTERFACE, 'metric', '10', 'table', TABLE])
     last_probe, dns_ready = float('-inf'), False
+    selection = Selector(recoveries=1, failures=2)
+    active, selected_route = None, None
+    penalties = {'ethernet': 0, 'wifi': 0}
+    dns_failures = 0
+    health = {}
+    tunnel_https = False
+    mode = 'AUTO'
     while not (ROOT / 'stop').exists():
         if not alive({'pid': parent_pid, 'start': parent_start}):
             (ROOT / 'stop').touch()
             break
         atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
+        if time.monotonic() - last_probe >= 10:
+            import dbus
+            try:
+                mode = str(dbus.SystemBus().get_object('com.victronenergy.settings',
+                    '/Settings/RoadLink/Wan/Mode').GetValue(dbus_interface='com.victronenergy.BusItem'))
+            except dbus.DBusException:
+                mode = 'AUTO'
+            eth = vpn_transport.ethernet(config, command)
+            wan = load_json(Path('/run/roadlink-wan/status.json'), {})
+            wifi = vpn_transport.wifi(wan)
+            health['ethernet'] = https_probe(eth['dev']) if eth else {'healthy': False, 'score': 0}
+            atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
+            health['wifi'] = {'healthy': False, 'score': 0}
+            if wifi and alive(load_json(Path('/run/roadlink-wan/guard.json'), {})):
+                result = command(['ip', 'netns', 'exec', 'roadlink-wan', sys.executable,
+                                  str(Path(__file__).with_name('wan_health.py')), 'disabledrlwan'], check=False)
+                try:
+                    import json
+                    health['wifi'] = json.loads(result.stdout)
+                except (ValueError, TypeError): pass
+            atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
+            now = time.monotonic()
+            links = {key: Link('ONLINE' if info['healthy'] and now >= penalties[key] else 'FAILED',
+                              info['score'], trusted=True) for key, info in health.items()}
+            desired = selection.choose(mode, links['ethernet'], links['wifi'], now) if mode in MODES else None
+            route = {'ethernet': eth, 'wifi': wifi}.get(desired)
+            if route != selected_route or desired != active:
+                vpn_transport.select(config, route, command)
+                # Recreate the peer to discard its cached local source address
+                # when switching uplinks. Its private key/interface stay put.
+                command(['wg', 'set', INTERFACE, 'peer', config['public_key'], 'remove'])
+                command(['wg', 'set', INTERFACE, 'peer', config['public_key'], 'allowed-ips', '0.0.0.0/0',
+                         'endpoint', config['endpoint'] + ':' + str(config['port']), 'persistent-keepalive', '15'])
+                active, selected_route, dns_ready, dns_failures = desired, route, False, 0
+            dns_ready, last_probe = dns_probe(config), time.monotonic()
+            atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
+            tunnel_https = https_probe(INTERFACE, str(ipaddress.IPv4Interface(config['address']).ip))['healthy'] if dns_ready else False
+            dns_failures = 0 if dns_ready else dns_failures + 1
+            if active and dns_failures >= 2:
+                penalties[active] = time.monotonic() + 60
         values = command(['wg', 'show', INTERFACE, 'latest-handshakes']).stdout.split()
         handshake = int(values[1]) if len(values) == 2 else 0
         fresh = bool(handshake and 0 <= time.time() - handshake < 180)
-        if time.monotonic() - last_probe >= 15:
-            dns_ready, last_probe = dns_probe(config), time.monotonic()
-        write_json(ROOT / 'status.json', {'state': 'READY' if fresh and dns_ready else 'CONNECTING',
-                   'dns_ready': bool(fresh and dns_ready), 'internet': False,
+        write_json(ROOT / 'status.json', {'state': 'READY' if fresh and dns_ready and tunnel_https else 'CONNECTING',
+                   'dns_ready': bool(fresh and dns_ready), 'internet': bool(fresh and dns_ready and tunnel_https),
                    'handshake': handshake, 'endpoint': config['endpoint'],
-                   'address': config['address'], 'dns': config['dns']})
+                   'address': config['address'], 'dns': config['dns'], 'wan': active or '', 'health': health,
+                   'mode': mode, 'penalties': {key: time.monotonic() < expiry for key, expiry in penalties.items()}})
         time.sleep(1)
     # The independent guard owns final cleanup and keeps the flock until done.
 

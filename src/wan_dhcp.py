@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from storage import write_json
+from storage import write_json, load_json
 
 ROOT = Path('/run/roadlink-wan')
 INTERFACE = 'disabledrlwan'
@@ -45,6 +45,9 @@ def main():
         write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
     elif event in ('bound', 'renew'):
         value = lease(os.environ)
+        bridge = load_json(ROOT / 'state.json', {}).get('bridge')
+        if bridge and ipaddress.IPv4Interface(value['address']).network.overlaps(ipaddress.IPv4Network(bridge['subnet'])):
+            raise ValueError('DHCP lease overlaps the private transit link')
         command(['ip', '-4', 'addr', 'flush', 'dev', INTERFACE])
         command(['ip', 'addr', 'add', value['address'], 'dev', INTERFACE])
         command(['ip', '-4', 'route', 'flush', 'default'])

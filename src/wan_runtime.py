@@ -15,6 +15,7 @@ from storage import atomic_write, load_json, write_json
 from wan_config import station, dhcp_args
 from wan_bridge import plan, rules, ipv6_rules
 from vpn_config import read as vpn_config
+import wan_bridge_runtime
 
 ROOT = Path('/run/roadlink-wan')
 NS = 'roadlink-wan'
@@ -84,6 +85,7 @@ def cleanup():
     errors = []
     try:
         stop_children()
+        wan_bridge_runtime.cleanup(ROOT, command)
         ns_path = Path('/run/netns') / NS
         if ns_path.exists():
             if not namespace_owned(state):
@@ -224,11 +226,13 @@ def serve(parent_pid, parent_start):
         for option in ('all', 'default'):
             mutate(['ip', 'netns', 'exec', NS, 'sysctl', '-qw', 'net.ipv6.conf.' + option + '.disable_ipv6=1'])
         # Rules exist before the radio can transmit DHCP or IP data.
+        firewall = wan_bridge_runtime.configuration(vpn, mutate)
         for family, builder in (('iptables', rules(firewall, 'wan')), ('ip6tables', ipv6_rules('wan'))):
             for table, chain, args in builder:
                 mutate(['ip', 'netns', 'exec', NS, family, '-w', '3', '-t', table, '-I', chain, '1', *args])
         mutate(['iw', 'phy', state['phy'], 'set', 'netns', 'name', NS])
         mutate(['ip', 'netns', 'exec', NS, 'sysctl', '-qw', 'net.ipv6.conf.' + RADIO + '.disable_ipv6=1'])
+        bridge = wan_bridge_runtime.start(ROOT, state, firewall, mutate, inside)
         cursor, retry = 0, 0
         supplicant = dhcp = None
         started = 0
@@ -265,7 +269,7 @@ def serve(parent_pid, parent_start):
             write_json(ROOT / 'status.json', {'state': 'LEASED' if leased else 'ASSOCIATED' if connected else 'CONNECTING',
                        'ssid': profile['ssid'] if connected else '', 'profile_id': profile['id'],
                        'identity': state['identity'], 'driver': state['driver'], 'interface': RADIO,
-                       'address': lease.get('address', '') if leased else '', 'internet': False})
+                       'address': lease.get('address', '') if leased else '', 'internet': False, 'bridge': bridge})
             failed = (supplicant and supplicant.poll() is not None) or (dhcp and dhcp.poll() is not None)
             if failed or (supplicant and not leased and time.monotonic() - started > 45):
                 stop_children(); supplicant = dhcp = None
