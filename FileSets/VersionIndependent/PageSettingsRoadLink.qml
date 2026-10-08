@@ -6,6 +6,7 @@ MbPage {
         MbSubMenu { description: qsTr("Fahrzeug-WLAN"); subpage: Component { PageRoadLinkAP {} } }
         MbSubMenu { description: qsTr("Externe WLANs"); subpage: Component { PageRoadLinkWifi {} } }
         MbSubMenu { description: qsTr("Internet und Umschaltung"); subpage: Component { PageRoadLinkWAN {} } }
+        MbSubMenu { description: qsTr("WLAN-Anmeldung"); subpage: Component { PageRoadLinkPortal {} } }
         MbSubMenu { description: qsTr("Diagnose"); subpage: Component { PageRoadLinkDiagnostics {} } }
         MbItemValue { description: qsTr("Internet ueber"); item.bind: "com.coyodude.roadlink/Wan/Active" }
         MbItemValue { description: qsTr("Verbundenes WLAN"); item.bind: "com.coyodude.roadlink/WifiWan/SSID" }

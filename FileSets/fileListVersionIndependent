@@ -11,3 +11,6 @@
 /opt/victronenergy/gui/qml/PageRoadLinkWifiProfile.qml
 /opt/victronenergy/gui/qml/PageRoadLinkScan.qml
 /opt/victronenergy/gui/qml/PageRoadLinkScanResults.qml
+/opt/victronenergy/gui/qml/PageRoadLinkPortal.qml
+/opt/victronenergy/gui/qml/PageRoadLinkPortalDevices.qml
+/opt/victronenergy/gui/qml/PageRoadLinkKnownPortals.qml

@@ -64,7 +64,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.21',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.22',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -113,6 +113,8 @@ def main():
     install_dns_api(service)
     install_transport_api(service)
     install_radio_api(service)
+    from portal_manager import Manager as PortalManager
+    portal_manager=PortalManager(service,{'pid':os.getpid(),'start':token(os.getpid())},alive,SecretItem)
     service.register()
     worker = None
     signature = None
@@ -129,7 +131,9 @@ def main():
     direct_worker = None
     direct_signature = None
     direct_retry_at = 0
-    roots = {'ap': AP_ROOT, 'vpn': VPN_ROOT, 'wan': WAN_ROOT, 'direct': DIRECT_ROOT}
+    import portal_session_runtime
+    roots = {'ap': AP_ROOT, 'vpn': VPN_ROOT, 'wan': WAN_ROOT, 'direct': DIRECT_ROOT,
+             'portal': portal_session_runtime.ROOT}
 
     def stop_transport(name):
         root = roots[name]
@@ -139,6 +143,7 @@ def main():
             (root / 'stop').touch()
 
     def transport_busy(name):
+        if name=='portal': return portal_manager.busy()
         processes = {'ap': worker, 'vpn': vpn_worker, 'wan': wan_worker, 'direct': direct_worker}
         process = processes[name]
         root = roots[name]
@@ -173,6 +178,7 @@ def main():
             switching = (barrier.phase is not None or barrier.current != wanted
                          or barrier.current_key != radio_key)
             if switching:
+                portal_manager.update(False)
                 if ENROLLMENT_ROOT.exists() and not ENROLLMENT_ROOT.is_symlink():
                     write_json(ENROLLMENT_ROOT / 'request.json', {'pid': os.getpid(),
                         'start': token(os.getpid()), 'enabled': False})
@@ -411,6 +417,7 @@ def main():
             service['/Status'] = (('WLAN-Internet ueber VPN' if use_vpn else 'WLAN-Internet ohne VPN') if internet else
                                   'Lokales WLAN aktiv' if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET', 'DIRECT_INTERNET')
                                   else 'Fahrzeug-WLAN startet') if worker else 'Netzwerkdiagnose'
+            portal_manager.update(wanted!='off')
         except Exception:
             logging.exception('Status refresh failed')
         return True
@@ -422,6 +429,13 @@ def main():
     try:
         loop.run()
     finally:
+        portal_manager.cancel()
+        if portal_manager.worker and portal_manager.worker.poll() is None:
+            try:portal_manager.worker.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                portal_manager.worker.kill()
+                portal_manager.worker.wait(timeout=3)
+        portal_session_runtime.stop()
         if direct_worker and direct_worker.poll() is None:
             (DIRECT_ROOT / 'stop').touch()
             try:

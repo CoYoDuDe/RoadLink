@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.21 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.22 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -42,6 +42,18 @@ Unter **Fahrzeug-WLAN → Fahrzeug-WLAN über** das integrierte WLAN oder den US
 
 **Standardmäßig erhält das Fahrzeug-WLAN Internet über den geprüften VPN-Tunnel.** Ein direkter Betrieb muss ausdrücklich gewählt werden. Eine WLAN-Verbindung oder IP-Adresse allein reicht nicht. Ethernet und SSH für den Gerätezugang bleiben erhalten. WLAN-Betreiber können weiterhin einen verbundenen Teilnehmer erkennen; RoadLink macht ihn nicht unsichtbar.
 
+## WLAN-Anmeldung (in Entwicklung)
+
+Unter **WLAN-Anmeldung** ein verbundenes Fahrzeuggerät auswählen und die Freigabe starten. Die angezeigte Anmeldeseite im Browser dieses Geräts öffnen. Falls sie nicht erreichbar ist, das Fahrzeug-WLAN am Gerät kurz trennen und neu verbinden.
+
+Die Freigabe gilt nur für die geprüfte Portal-Adresse und höchstens 15 Minuten. Andere Fahrzeuggeräte erhalten diese Ausnahme nicht. Bei WLAN-Wechsel, abgelaufenen Adressen oder beendetem Auftrag wird sie entfernt. Internet und DNS werden danach unabhängig geprüft.
+
+Benötigt die Seite weitere Domains, vor dem Start bis zu drei davon mit Komma getrennt eintragen. Die Freigabe gilt nur für diese Anmeldung; zusätzliche Domains werden nicht automatisch übernommen.
+
+**Bekannte Portale automatisch** startet mit **Ein**. Unter **Bekannte Portale** kann die Einstellung je bestätigtem Profil geändert werden. Die Schalter und Profilspeicherung sind vorhanden; das Erfassen erfolgreicher manueller Anmeldungen und die automatische Anmeldung werden noch entwickelt. Der Schalter allein bestätigt keine Bedingungen und schaltet kein Internet frei. Geänderte Bedingungen, Zahlung, SMS, CAPTCHA oder persönliche Angaben erfordern eine manuelle Prüfung.
+
+Die Prüfung mit echten öffentlichen Portalen ist noch offen. Starlink-Bypass erst nach abgeschlossener Gesamtprüfung verwenden.
+
 ## Verbindungsmodi
 
 ### Fahrzeugnetz und VPN
@@ -71,7 +83,7 @@ Beim Wechsel beendet RoadLink zunächst den bisherigen Modus und prüft dessen B
 
 ## Noch offen
 
-WLAN-Anmeldeseiten, Geschwindigkeitsmessung und gelerntes Ranking, echte Bündelung/Beschleunigung, Handy-Import, Clientverwaltung sowie Weboberfläche/GUI v2. Ein WLAN ohne nutzbaren Internet-/VPN-Zugang wird derzeit verworfen; eine Anmeldeseite wird noch nicht geöffnet. HTTPS-basierte Fremd-DNS-Dienste werden noch nicht vollständig gefiltert. Die aktuelle Oberfläche unterstützt das klassische Venus-GUI und die Remote Console.
+WLAN-Anmeldung und automatische Zustimmung sind noch in Entwicklung und nicht mit echten öffentlichen Portalen fertig geprüft. Ebenfalls offen: Geschwindigkeitsmessung und gelerntes Ranking, echte Bündelung/Beschleunigung, Handy-Import, Clientverwaltung sowie Weboberfläche/GUI v2. Eine WLAN-Verbindung oder Portal-Freigabe allein gilt nicht als funktionierender Internet-/VPN-Zugang. HTTPS-basierte Fremd-DNS-Dienste werden noch nicht vollständig gefiltert. Die aktuelle Oberfläche unterstützt das klassische Venus-GUI und die Remote Console.
 
 ## Updates und Entfernen
 

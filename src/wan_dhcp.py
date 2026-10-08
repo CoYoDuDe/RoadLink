@@ -7,9 +7,11 @@ from pathlib import Path
 import subprocess
 import sys
 from storage import write_json, load_json
+import wan_lease
 
 ROOT = Path('/run/roadlink-wan')
 INTERFACE = 'disabledrlwan'
+NS = 'roadlink-wan'
 
 
 def lease(environ):
@@ -27,14 +29,38 @@ def lease(environ):
 
 
 def main():
+    from ap_runtime import alive, token
     # A netns handle and /proc/net/ns inode must identify the exact namespace.
-    if (os.stat('/proc/self/ns/net').st_ino != os.stat('/run/netns/roadlink-wan').st_ino
+    if (os.stat('/proc/self/ns/net').st_ino != os.stat('/run/netns/' + NS).st_ino
             or os.stat('/proc/self/ns/net').st_ino == os.stat('/proc/1/ns/net').st_ino
             or os.environ.get('interface') != INTERFACE):
         raise RuntimeError('Refusing DHCP changes outside the owned WAN namespace')
+    def authorize():
+        if (ROOT / 'stop').exists() or (ROOT / 'cleaning').exists():
+            raise RuntimeError('DHCP owner is stopping')
+        state = load_json(ROOT / 'state.json', {})
+        connection = load_json(ROOT / 'connection.json', {})
+        if not wan_lease.owned(connection, load_json(ROOT / 'dhcp.json', {}),
+                load_json(ROOT / 'controller.json', {}), load_json(ROOT / 'guard.json', {}),
+                state, alive, parent=os.getppid()):
+            raise RuntimeError('DHCP connection ownership changed')
+        ns = os.stat('/proc/self/ns/net')
+        if (ns.st_ino, ns.st_dev) != (state.get('namespace_inode'), state.get('namespace_device')):
+            raise RuntimeError('DHCP namespace identity changed')
+        links = json.loads(subprocess.run(['ip', '-j', 'link', 'show', 'dev', INTERFACE],
+            check=True, capture_output=True, timeout=5).stdout)
+        if len(links) != 1 or links[0].get('ifindex') != state.get('ifindex'):
+            raise RuntimeError('DHCP radio identity changed')
+        return connection
+    binding = authorize()
+    write_json(ROOT / 'dhcp_hook.json', {'pid': os.getpid(), 'start': token(os.getpid())})
+    authorize()
     event = sys.argv[1]
     def command(args):
-        return subprocess.run(args, check=True, capture_output=True, timeout=5)
+        if authorize() != binding: raise RuntimeError('DHCP binding changed')
+        result = subprocess.run(args, check=True, capture_output=True, timeout=5)
+        authorize()
+        return result
     if event == 'deconfig':
         command(['ip', '-4', 'addr', 'flush', 'dev', INTERFACE])
         # A new namespace may have no main FIB yet. Query all existing tables
@@ -43,6 +69,7 @@ def main():
         if any(route.get('dev') == INTERFACE for route in routes):
             command(['ip', '-4', 'route', 'flush', 'dev', INTERFACE])
         write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
+        write_json(ROOT / 'portal-hints.json', {})
     elif event in ('bound', 'renew'):
         value = lease(os.environ)
         bridge = load_json(ROOT / 'state.json', {}).get('bridge')
@@ -53,9 +80,13 @@ def main():
         command(['ip', '-4', 'route', 'flush', 'default'])
         if value['gateway']:
             command(['ip', 'route', 'add', 'default', 'via', value['gateway'], 'dev', INTERFACE])
-        write_json(ROOT / 'lease.json', dict(value, state='LEASED'))
-    # Ignore offered DNS, hostname, NTP and classless routes. Host resolver and
-    # host routing are never accessed by this hook.
+        if authorize() != binding: raise RuntimeError('DHCP binding changed')
+        write_json(ROOT / 'lease.json', dict(value, state='LEASED', connection=binding))
+        # Hint capture grants no DNS access or Internet/portal authorization.
+        write_json(ROOT / 'portal-hints.json', dict(wan_lease.hints(os.environ),
+                   connection=binding, lease=value))
+    # Ignore offered hostname, NTP and classless routes. Offered DNS is private
+    # portal metadata only; host resolver and routing are never accessed here.
 
 
 if __name__ == '__main__':

@@ -27,6 +27,9 @@ from reserve_policy import Gate
 from wan_config import wan_mode
 import wan_bridge_runtime
 import owned_netns
+import wan_lease
+import portal_state
+import portal_pins
 from runtime_lock import busy as runtime_locked
 
 ROOT = Path('/run/roadlink-wan')
@@ -75,7 +78,16 @@ def inside(args, check=True):
 
 
 def stop_children():
-    children = [load_json(ROOT / (name + '.json'), {}) for name in ('scanner', 'mutation', 'supplicant', 'dhcp', 'namespace_creator', 'enrollment')]
+    import portal_session_runtime
+    portal_session_runtime.stop()
+    # Revoke association-bound metadata before any child can outlive a pause.
+    write_json(ROOT / 'connection.json', {})
+    write_json(ROOT / 'portal-hints.json', {})
+    write_json(ROOT / 'portal-result.json', {})
+    write_json(ROOT / 'portal-pins.json', {})
+    write_json(ROOT / 'portal-resolve-request.json', {})
+    write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
+    children = [load_json(ROOT / (name + '.json'), {}) for name in ('scanner', 'mutation', 'supplicant', 'dhcp', 'dhcp_hook', 'portal', 'namespace_creator', 'enrollment')]
     for sig, seconds in ((signal.SIGTERM, 3), (signal.SIGKILL, 2)):
         for state in children:
             if alive(state):
@@ -86,6 +98,8 @@ def stop_children():
             time.sleep(.1)
     if any(alive(state) for state in children):
         raise RuntimeError('Owned WLAN child could not stop')
+    if load_json(ROOT / 'portal-rules.json', {}):
+        inside([sys.executable, str(Path(__file__).with_name('portal_runtime.py')), 'cleanup'])
     socket = ROOT / 'control' / RADIO
     if socket.is_socket(): socket.unlink()
 
@@ -171,8 +185,13 @@ def guard(pid, start, lock_fd):
 
 
 def child(name, parent_pid, parent_start, lock_fd, args):
-    if name not in ('supplicant', 'dhcp', 'mutation', 'scanner'): raise ValueError('Unknown WLAN child')
-    write_json(ROOT / (name + '.json'), {'pid': os.getpid(), 'start': token(os.getpid())})
+    if name not in ('supplicant', 'dhcp', 'mutation', 'scanner', 'portal'): raise ValueError('Unknown WLAN child')
+    identity = {'pid': os.getpid(), 'start': token(os.getpid())}
+    if name == 'dhcp':
+        identity.update(connection=load_json(ROOT / 'connection.json', {}),
+                        controller=load_json(ROOT / 'controller.json', {}),
+                        guard=load_json(ROOT / 'guard.json', {}))
+    write_json(ROOT / (name + '.json'), identity)
     if ((ROOT / 'stop').exists() or (ROOT / 'cleaning').exists()
             or not alive({'pid': parent_pid, 'start': parent_start})
             or not alive(load_json(ROOT / 'guard.json', {}))):
@@ -298,6 +317,8 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
         retry, next_scan = 0, 0
         profile = None
         supplicant = dhcp = None
+        portal, next_portal, portal_started = None, 0, 0
+        portal_wait = portal_state.Wait()
         scan_paused = False
         scan_ready = not profiles
         started = 0
@@ -328,6 +349,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                 profile = candidates.select(load_json(ROOT / 'scan.json', {}), time.time(), time.monotonic(),
                                             allow_last_resort=reserve_allowed)
             if profile is None:
+                association, connection_id = None, ''
                 if not scan_ready:
                     inside(['ip', 'link', 'set', RADIO, 'down'])
                     inside(['ip', '-4', 'addr', 'flush', 'dev', RADIO])
@@ -355,6 +377,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                     inside(['ip', 'link', 'set', RADIO, 'up'])
                     write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
                     scan_paused = True
+                    association, connection_id = None, ''
                 write_json(ROOT / 'status.json', {'state': 'SCAN_ONLY', 'ssid': '', 'internet': False,
                            'driver': state['driver'], 'interface': RADIO, 'identity': state['identity'], 'bridge': bridge})
                 scanner.tick(True)
@@ -379,8 +402,22 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
             connected = status.get('wpa_state') == 'COMPLETED'
             current_association = (profile['id'], status.get('bssid', '')) if connected else None
             if current_association != association:
+                # Revoke old hints before terminating their DHCP hook. A roam
+                # or disconnect must never inherit the preceding lease/portal.
+                write_json(ROOT / 'connection.json', {})
+                write_json(ROOT / 'portal-hints.json', {})
+                write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
+                if dhcp is not None:
+                    stop_children(); supplicant = dhcp = None
+                    association, connection_id = None, ''
+                    inside(['ip', '-4', 'addr', 'flush', 'dev', RADIO])
+                    inside(['ip', '-4', 'route', 'flush', 'default'], check=False)
+                    continue
                 connection_id = secrets.token_hex(12) if connected else ''
                 association = current_association
+                if connected:
+                    write_json(ROOT / 'connection.json', wan_lease.connection(
+                        connection_id, profile['id'], status.get('bssid', ''), state))
             if connected:
                 radios = inside(['iw', 'dev']).stdout
                 if radios.count('Interface ') != 1 or 'type managed' not in radios:
@@ -388,7 +425,20 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
             lease = load_json(ROOT / 'lease.json', {})
             if connected and dhcp is None:
                 dhcp = launch('dhcp', dhcp_args(RADIO, '/data/RoadLink/src/wan_dhcp.py', hostname))
-            leased = connected and dhcp and dhcp.poll() is None and lease.get('state') == 'LEASED'
+            binding = load_json(ROOT / 'connection.json', {})
+            leased = (connected and dhcp and dhcp.poll() is None and wan_lease.current(lease, binding)
+                      and wan_lease.owned(binding, load_json(ROOT / 'dhcp.json', {}),
+                          load_json(ROOT / 'controller.json', {}), load_json(ROOT / 'guard.json', {}), state, alive))
+            resolution_due = leased and portal_pins.pending(load_json(ROOT/'portal-resolve-request.json', {}),
+                load_json(ROOT/'portal-pins.json', {}), binding, lease, load_json(ROOT/'portal-hints.json', {}),
+                load_json(ROOT/'portal-result.json', {}), time.monotonic())
+            if leased and (portal is None or portal.poll() is not None) and (time.monotonic() >= next_portal or resolution_due):
+                inside([sys.executable, str(Path(__file__).with_name('portal_runtime.py')), 'cleanup'])
+                resolving = resolution_due and time.monotonic() < next_portal
+                args = [sys.executable, str(Path(__file__).with_name('portal_runtime.py'))]
+                portal = launch('portal', args+(['resolve'] if resolving else []))
+                portal_started = time.monotonic()
+                if not resolving: next_portal = time.monotonic() + 30
             if leased and time.monotonic() - last_health >= 10:
                 pulse()
                 try:
@@ -400,13 +450,17 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                 health_failures = 0 if healthy else health_failures + 1
                 last_health = time.monotonic()
             scanner.tick(bool(leased))
+            portal_result = portal_state.current(load_json(ROOT / 'portal-result.json', {}), binding,
+                lease, load_json(ROOT / 'portal-hints.json', {}), time.monotonic()) if leased else None
             write_json(ROOT / 'status.json', {'state': 'LEASED' if leased else 'ASSOCIATED' if connected else 'CONNECTING',
                        'ssid': profile['ssid'] if connected else '', 'profile_id': profile['id'],
                        'identity': state['identity'], 'driver': state['driver'], 'interface': RADIO,
                        'address': lease.get('address', '') if leased else '', 'internet': False,
                        'connection_id': connection_id if leased else '',
                        'lease': {key: lease.get(key, '') for key in ('address', 'gateway')} if leased else None,
-                       'bridge': bridge, 'bootstrap': bootstrap})
+                       'bridge': bridge, 'bootstrap': bootstrap,
+                       'portal_state': (portal_result or {}).get('state', 'CHECKING' if leased and portal and portal.poll() is None else 'UNKNOWN'),
+                       'https_healthy': bool(last_health and not health_failures)})
             failed = (supplicant and supplicant.poll() is not None) or (dhcp and dhcp.poll() is not None)
             vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
             proven = (use_vpn and vpn_state.get('state') == 'READY'
@@ -424,7 +478,10 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                 profile['discovered'] = False
             tunnel_failed = (use_vpn and leased and vpn_state.get('penalties', {}).get('wifi', False)
                              and vpn_state.get('wifi_penalty_profile') == profile['id'])
-            if failed or health_failures >= 2 or tunnel_failed or (supplicant and not leased and time.monotonic() - started > 45):
+            captive_wait = portal_wait.allow(binding if leased else None, portal_result, time.monotonic(), proven=proven)
+            first_probe = (leased and portal and portal.poll() is None
+                           and time.monotonic()-portal_started < 22 and not portal_result)
+            if failed or ((health_failures >= 2 or tunnel_failed) and not captive_wait and not first_probe) or (supplicant and not leased and time.monotonic() - started > 45):
                 stop_children(); supplicant = dhcp = None
                 candidates.reject(profile['id'], time.monotonic())
                 profile = None

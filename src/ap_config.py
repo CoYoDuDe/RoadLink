@@ -35,7 +35,7 @@ def choose_subnet(occupied, preferred='172.27.88.0/24'):
     raise ValueError('No non-overlapping AP subnet available')
 
 
-def isolated_dhcp(interface, subnet, vpn_dns=None):
+def isolated_dhcp(interface, subnet, vpn_dns=None, portal=None):
     if not re.fullmatch(r'ap[a-zA-Z0-9_]{1,12}', interface):
         raise ValueError('Invalid AP interface')
     net = ipaddress.ip_network(subnet)
@@ -50,6 +50,15 @@ def isolated_dhcp(interface, subnet, vpn_dns=None):
                 or dns.is_multicast or dns.is_reserved or dns in net):
             raise ValueError('VPN DNS must be usable IPv4 outside the AP subnet')
         options = 'dhcp-option=3,{}\ndhcp-option=6,{}\n'.format(net[1], dns)
+    if portal is not None:
+        from portal_clients import mac
+        hardware=mac(portal['mac'])
+        address=ipaddress.IPv4Address(portal['ip'])
+        if address not in net or address in (net.network_address,net.broadcast_address,net[1]):
+            raise ValueError('Portal DHCP client must be inside the vehicle subnet')
+        options=options.replace('dhcp-option=','dhcp-option=tag:!rlportal,')
+        options+='dhcp-host={},id:*,set:rlportal,{},1m\n'.format(hardware,address)
+        options+='dhcp-option=tag:rlportal,3,{}\ndhcp-option=tag:rlportal,6,{}\n'.format(net[1],net[1])
     return ('interface={}\nbind-interfaces\nport=0\nno-resolv\nno-hosts\n'
             'dhcp-range={},{},255.255.255.0,{}\n{}'
             'dhcp-leasefile=/run/roadlink/ap.leases\n').format(

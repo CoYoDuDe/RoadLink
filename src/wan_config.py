@@ -49,7 +49,7 @@ def dhcp_args(interface, hook, hostname=''):
     # parameter list. Only an explicitly chosen hostname is supplied.
     hostname = client_name(hostname)
     return ['udhcpc', '-f', '-B', '-n', '-t', '3', '-T', '3', '-o', '-C', '-V', '',
-            '-O', '1', '-O', '3', '-O', '51', '-O', '54'] + (
+            '-O', '1', '-O', '3', '-O', '6', '-O', '51', '-O', '54', '-O', '114'] + (
             ['-x', 'hostname:' + hostname] if hostname else []) + ['-i', interface, '-s', str(hook)]
 def wan_mode():
     import dbus

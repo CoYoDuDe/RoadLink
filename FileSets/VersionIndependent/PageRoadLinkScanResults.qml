@@ -8,6 +8,8 @@ MbPage {
         description: modelData.ssid
         item.text: modelData.signal + " dBm / " + (modelData.security === "psk" ? "WPA2" : modelData.security === "open" ? qsTr("offen") : qsTr("nicht unterstuetzt"))
         enabled: modelData.security !== "unsupported"
-        subpage: Component { PageRoadLinkWifiAdd { scanId: modelData.id } }
+        opacity: enabled ? 1 : 0.5
+        subpage: enabled ? addPage : undefined
+        Component { id: addPage; PageRoadLinkWifiAdd { scanId: modelData.id } }
     }
 }

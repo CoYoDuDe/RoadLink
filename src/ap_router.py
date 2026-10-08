@@ -1,5 +1,6 @@
 """Source-scoped AP routing; a missing WireGuard link never selects main."""
 import ipaddress
+import json
 from pathlib import Path
 from storage import load_json, write_json
 
@@ -26,7 +27,14 @@ def plan(subnet, vpn):
             or dns.is_multicast or dns.is_reserved
             or network.overlaps(address.network) or dns in network):
         raise ValueError('Invalid or overlapping AP/VPN addressing')
-    return {'subnet': str(network), 'address': str(address.ip), 'dns': str(dns)}
+    result = {'subnet': str(network), 'address': str(address.ip), 'dns': str(dns)}
+    # Android strict Private DNS keeps the public hostname for TLS verification.
+    # Only DNSmith's own public endpoint maps to its isolated in-tunnel resolver.
+    from dns_config import PUBLIC_DNSMITH
+    if (str(dns) == '10.8.0.1' and vpn.get('endpoint') == PUBLIC_DNSMITH
+            and vpn.get('port', 51820) == 51820):
+        result['dnsmith_dot_alias'] = PUBLIC_DNSMITH
+    return result
 
 
 def rules(config):
@@ -44,6 +52,15 @@ def rules(config):
                '-d', config['dns'], '-p', protocol, '--dport', '53'] + tag + ['-j', 'ACCEPT'])
         yield ('nat', 'PREROUTING', ['-i', AP, '-s', config['subnet'], '-p', protocol,
                '--dport', '53'] + tag + ['-j', 'DNAT', '--to-destination', config['dns']])
+    if 'dnsmith_dot_alias' in config:
+        from dns_config import PUBLIC_DNSMITH
+        if config['dnsmith_dot_alias'] != PUBLIC_DNSMITH or config['dns'] != '10.8.0.1':
+            raise ValueError('Invalid DNSmith encrypted DNS alias')
+        yield ('filter', 'FORWARD', ['-i', AP, '-s', config['subnet'], '-o', VPN,
+               '-d', config['dns'], '-p', 'tcp', '--dport', '853'] + tag + ['-j', 'ACCEPT'])
+        yield ('nat', 'PREROUTING', ['-i', AP, '-s', config['subnet'],
+               '-d', config['dnsmith_dot_alias'], '-p', 'tcp', '--dport', '853'] +
+               tag + ['-j', 'DNAT', '--to-destination', config['dns'] + ':853'])
     yield ('nat', 'POSTROUTING', ['-s', config['subnet'], '-o', VPN] + tag +
            ['-j', 'SNAT', '--to-source', config['address']])
     yield ('mangle', 'FORWARD', ['-i', AP, '-o', VPN, '-p', 'tcp', '--tcp-flags', 'SYN,RST', 'SYN'] +
@@ -81,17 +98,59 @@ def vpn_interface_ready():
         return False
 
 
+def route_entries(command):
+    result = command(['ip', '-j', '-4', 'route', 'show', 'table', TABLE], check=False)
+    if result.returncode and 'FIB table does not exist' not in (result.stderr or ''):
+        raise RuntimeError('Cannot inspect AP route ownership')
+    entries = json.loads(result.stdout or '[]')
+    if not isinstance(entries, list): raise RuntimeError('Invalid AP route inventory')
+    for entry in entries:
+        if not isinstance(entry, dict): raise RuntimeError('Invalid AP route entry')
+        if set(entry) - {'dst', 'dev', 'scope', 'metric', 'flags', 'type', 'protocol'}:
+            raise RuntimeError('Foreign AP route retained')
+        common = (entry.get('dst') == 'default' and entry.get('protocol', 'boot') == 'boot'
+                  and entry.get('flags', []) in ([], ['linkdown']))
+        fallback = (common and entry.get('type') == 'unreachable' and entry.get('metric') == 32767
+                    and 'dev' not in entry and 'scope' not in entry)
+        active = (common and entry.get('type', 'unicast') == 'unicast' and entry.get('metric') == 10
+                  and entry.get('dev') == VPN and entry.get('scope', 'link') == 'link')
+        if not (fallback or active): raise RuntimeError('Foreign AP route retained')
+    if len(entries) != len({entry.get('metric') for entry in entries}):
+        raise RuntimeError('Ambiguous AP route ownership')
+    return entries
+
+
+def policy_entries(command, allow_detached=False):
+    result = command(['ip', '-j', '-4', 'rule', 'show'])
+    rows = json.loads(result.stdout)
+    if not isinstance(rows, list): raise RuntimeError('Invalid AP policy inventory')
+    selected = [row for row in rows if row.get('priority') == int(PRIORITY)]
+    keys = {'priority', 'src', 'table', 'iif'}
+    def expected_keys(row):
+        # Kernel marks an exact iif rule detached after AP teardown.
+        return (set(row) == keys or allow_detached and set(row) == keys | {'iif_detached'}
+                and row['iif_detached'] is None)
+    if len(selected) > 1 or any(not expected_keys(row)
+            or row.get('src') != 'all' or str(row.get('table')) != TABLE or row.get('iif') != AP
+            for row in selected):
+        raise RuntimeError('Foreign AP policy retained')
+    return selected
+
+
 def reconcile(command):
-    # Kernel removal of WireGuard also removes this route; unreachable remains.
-    if vpn_interface_ready():
-        current = command(['ip', 'route', 'show', 'table', TABLE], check=False).stdout
-        if 'default dev ' + VPN + ' ' not in current:
-            result = command(['ip', 'route', 'replace', 'default', 'dev', VPN,
-                              'metric', '10', 'table', TABLE], check=False)
-            if result.returncode and vpn_interface_ready():
-                raise RuntimeError('AP VPN route installation failed')
-            # If the VPN disappeared or went down meanwhile, retain the
-            # unreachable route and retry next tick without restarting AP.
+    entries = route_entries(command)
+    if sum(entry.get('type') == 'unreachable' for entry in entries) != 1:
+        raise RuntimeError('AP unreachable fallback changed externally')
+    if not policy_entries(command):
+        raise RuntimeError('AP policy changed externally')
+    # Add never replaces another default. Missing WireGuard retains unreachable.
+    if vpn_interface_ready() and not any(entry.get('metric') == 10 for entry in entries):
+        result = command(['ip', '-4', 'route', 'add', 'default', 'dev', VPN,
+                          'metric', '10', 'table', TABLE], check=False)
+        if result.returncode and vpn_interface_ready():
+            raise RuntimeError('AP VPN route installation failed')
+        if not result.returncode:
+            route_entries(command)
 
 
 def cleanup(root, command):
@@ -105,13 +164,28 @@ def cleanup(root, command):
         command(rule_command('-D', rule), check=False)
         if command(rule_command('-C', rule), check=False).returncode == 0:
             errors.append('AP routed firewall cleanup incomplete')
-    command(['ip', 'rule', 'del', 'priority', PRIORITY, 'iif', AP, 'lookup', TABLE], check=False)
-    command(['ip', 'route', 'del', 'default', 'metric', '10', 'table', TABLE], check=False)
-    command(['ip', 'route', 'del', 'unreachable', 'default', 'metric', '32767', 'table', TABLE], check=False)
-    if PRIORITY + ':' in command(['ip', 'rule', 'show']).stdout:
-        errors.append('AP policy cleanup incomplete')
-    if command(['ip', 'route', 'show', 'table', TABLE], check=False).stdout.strip():
-        errors.append('AP route cleanup incomplete')
+    # Revoke permissions even if a foreign route/rule blocks ownership checks.
+    try:
+        policies = policy_entries(command, allow_detached=True)
+        if policies:
+            command(['ip', '-4', 'rule', 'del', 'priority', PRIORITY, 'from', 'all',
+                     'iif', AP, 'lookup', TABLE], check=False)
+        if policy_entries(command, allow_detached=True): raise RuntimeError('AP policy cleanup incomplete')
+    except Exception as exc:
+        errors.append(str(exc))
+    try:
+        entries = route_entries(command)
+        # Keep the unreachable fallback while an ambiguous selector remains.
+        if not errors:
+            for entry in entries:
+                args = ['ip', '-4', 'route', 'del']
+                if entry.get('type') == 'unreachable': args += ['unreachable']
+                args += ['default', 'metric', str(entry['metric']), 'table', TABLE]
+                if entry.get('dev'): args += ['dev', entry['dev']]
+                command(args, check=False)
+            if route_entries(command): raise RuntimeError('AP route cleanup incomplete')
+    except Exception as exc:
+        errors.append(str(exc))
     if not errors and state['forward_before'] == '0':
         if Path('/proc/sys/net/ipv4/ip_forward').read_text().strip() == '1':
             Path('/proc/sys/net/ipv4/ip_forward').write_text('0\n')

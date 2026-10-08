@@ -42,6 +42,10 @@ if [ "$scriptAction" = 'INSTALL' ] || [ "$scriptAction" = 'UNINSTALL' ]; then
     if [ -d /service/com.coyodude.roadlink ]; then
         svc -d /service/com.coyodude.roadlink
     fi
+    if [ -f "$scriptDir/src/portal_session_runtime.py" ] && ! python3 "$scriptDir/src/portal_session_runtime.py" stop; then
+        logMessage 'RoadLink Portal konnte nicht beendet werden; installierte Dateien bleiben erhalten'
+        exit 245
+    fi
     if [ -f "$scriptDir/src/direct_runtime.py" ] && ! python3 "$scriptDir/src/direct_runtime.py" stop; then
         logMessage 'RoadLink direct cleanup failed; leaving installed files intact'
         exit 245

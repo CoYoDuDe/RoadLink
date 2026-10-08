@@ -19,7 +19,7 @@ class Barrier:
             return True
         if self.phase is None:
             self.phase = 0
-        groups = (('direct', 'vpn'), ('ap', 'wan'))
+        groups = (('portal',), ('direct', 'vpn'), ('ap', 'wan'))
         while self.phase < len(groups):
             group = groups[self.phase]
             for name in group:

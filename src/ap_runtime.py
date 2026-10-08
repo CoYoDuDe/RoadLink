@@ -73,6 +73,8 @@ def rules():
 
 
 def cleanup():
+    import portal_session_runtime
+    portal_session_runtime.stop()
     (ROOT / 'cleaning').touch()
     errors = []
     for name in ('mutation', 'hostapd', 'dnsmasq'):
@@ -262,6 +264,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
         command(['dnsmasq', '--test', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
     ap = launch('hostapd', ['hostapd', str(ROOT / 'hostapd.conf')])
     dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
+    advertised_portal=None
     ready = False
     startup_deadline = time.monotonic() + 20
     while not (ROOT / 'result.json').exists():
@@ -292,8 +295,12 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
                 direct = direct_current(subnet, dns_settings(), alive)
                 internet = bool(ready and direct)
                 desired_dns = direct['dns'] if internet else None
-            if desired_dns != advertised_dns:
-                dhcp = isolated_dhcp(INTERFACE, subnet, desired_dns).replace(
+            import portal_dhcp
+            desired_portal=portal_dhcp.selected(subnet,load_json,alive,time.monotonic(),lambda:
+                any((root/marker).exists() for root in (ROOT,portal_dhcp.PORTAL)
+                    for marker in ('stop','cleaning')))
+            if desired_dns != advertised_dns or desired_portal!=advertised_portal:
+                dhcp = isolated_dhcp(INTERFACE, subnet, desired_dns,desired_portal).replace(
                     '/run/roadlink/ap.leases', str(ROOT / 'leases'))
                 atomic_write(ROOT / 'dnsmasq.conf', dhcp.encode())
                 command(['dnsmasq', '--test', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
@@ -306,6 +313,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
                 dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground',
                                       '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
                 advertised_dns = desired_dns
+                advertised_portal=desired_portal
             write_json(ROOT / 'status.json', {'state': ('VPN_INTERNET' if use_vpn else 'DIRECT_INTERNET') if internet else
                        'LAN_ONLY' if ready else 'STARTING', 'address': address,
                        'ssid': ssid, 'internet': internet, 'dns': advertised_dns or ''})
