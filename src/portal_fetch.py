@@ -22,7 +22,7 @@ def limits(body_limit, wire_limit):
         raise ValueError('Invalid portal response budgets')
 
 
-def decode(raw, closed=False, *, body_limit=MAX_BODY, wire_limit=MAX_WIRE):
+def decode(raw, closed=False, *, body_limit=MAX_BODY, wire_limit=MAX_WIRE, cookies=False):
     limits(body_limit, wire_limit)
     if not isinstance(raw, bytes) or len(raw) > wire_limit: raise ValueError('Portal response too large')
     marker = raw.find(b'\r\n\r\n')
@@ -34,12 +34,16 @@ def decode(raw, closed=False, *, body_limit=MAX_BODY, wire_limit=MAX_WIRE):
     match = re.fullmatch(rb'HTTP/1\.[01] ([1-5][0-9]{2})(?: [\x20-\x7e]*)?', lines[0])
     if not match or len(lines) > 65: raise ValueError('Invalid portal status')
     fields = {}
+    cookie_headers=[]
     for line in lines[1:]:
         if b':' not in line: raise ValueError('Invalid portal header')
         name, value = line.split(b':', 1)
         if not re.fullmatch(rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name): raise ValueError('Invalid header name')
         if any(byte < 32 and byte != 9 or byte == 127 for byte in value): raise ValueError('Invalid header value')
         name = name.lower()
+        if cookies and name == b'set-cookie':
+            if len(cookie_headers)>=16:raise ValueError('Too many portal cookies')
+            cookie_headers.append(value.strip().decode('ascii'))
         if name in fields and name in (b'content-length', b'transfer-encoding', b'content-type', b'content-encoding', b'location'):
             raise ValueError('Ambiguous portal headers')
         fields.setdefault(name, value.strip())
@@ -87,8 +91,10 @@ def decode(raw, closed=False, *, body_limit=MAX_BODY, wire_limit=MAX_WIRE):
     else:
         if len(body) > body_limit: raise ValueError('Portal body too large')
         if not closed: raise Incomplete()
-    return {'status': int(match[1]), 'content_type': fields.get(b'content-type', b'').decode('ascii'),
-            'location': fields.get(b'location', b'').decode('ascii'), 'body': body}
+    result = {'status': int(match[1]), 'content_type': fields.get(b'content-type', b'').decode('ascii'),
+              'location': fields.get(b'location', b'').decode('ascii'), 'body': body}
+    if cookies:result['cookies']=cookie_headers
+    return result
 
 
 def request(url):
@@ -101,7 +107,7 @@ def request(url):
             + '\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n').encode('ascii')
 
 
-def receive(sock, check, deadline, *, body_limit=MAX_BODY, wire_limit=MAX_WIRE):
+def receive(sock, check, deadline, *, body_limit=MAX_BODY, wire_limit=MAX_WIRE, cookies=False):
     limits(body_limit, wire_limit)
     raw = bytearray()
     while True:
@@ -109,7 +115,7 @@ def receive(sock, check, deadline, *, body_limit=MAX_BODY, wire_limit=MAX_WIRE):
         chunk = sock.recv(min(4096, wire_limit+1-len(raw)))
         raw.extend(chunk)
         try:
-            value = decode(bytes(raw), closed=not chunk, body_limit=body_limit, wire_limit=wire_limit)
+            value = decode(bytes(raw), closed=not chunk, body_limit=body_limit, wire_limit=wire_limit, cookies=cookies)
             check()
             return value
         except Incomplete:

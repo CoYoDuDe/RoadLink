@@ -32,6 +32,9 @@ import portal_state
 import portal_pins
 import portal_review
 import vpn_status
+import portal_auto
+import portal_known
+import portal_session_runtime
 from runtime_lock import busy as runtime_locked
 
 ROOT = Path('/run/roadlink-wan')
@@ -439,14 +442,21 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
             review_due = leased and portal_review.pending(load_json(ROOT/'portal-review-request.json', {}),
                 load_json(ROOT/'portal-review-result.json', {}), binding, lease, load_json(ROOT/'portal-hints.json', {}),
                 load_json(ROOT/'portal-result.json', {}), time.monotonic())
-            if leased and (portal is None or portal.poll() is not None) and (time.monotonic() >= next_portal or resolution_due or review_due):
+            current_portal=portal_state.current(load_json(ROOT/'portal-result.json',{}),binding,
+                lease,load_json(ROOT/'portal-hints.json',{}),time.monotonic()) if leased else None
+            auto_due=(leased and current_portal and current_portal.get('state') in portal_state.CAPTIVE
+                and not portal_session_runtime.busy() and portal_auto.pending(current_portal,
+                    {'ssid':profile['ssid'],'bssids':[binding['bssid']],'wan_mac':profile['mac']},
+                    portal_known.KnownPortals(),load_json(ROOT/'portal-auto-result.json',{}),binding,lease))
+            if leased and (portal is None or portal.poll() is not None) and (time.monotonic() >= next_portal or resolution_due or review_due or auto_due):
                 inside([sys.executable, str(Path(__file__).with_name('portal_runtime.py')), 'cleanup'])
                 resolving = resolution_due and time.monotonic() < next_portal
                 reviewing = review_due and not resolving and time.monotonic() < next_portal
+                automatic = auto_due and not resolving and not reviewing and time.monotonic() < next_portal
                 args = [sys.executable, str(Path(__file__).with_name('portal_runtime.py'))]
-                portal = launch('portal', args+(['resolve'] if resolving else ['review'] if reviewing else []))
+                portal = launch('portal', args+(['resolve'] if resolving else ['review'] if reviewing else ['auto'] if automatic else []))
                 portal_started = time.monotonic()
-                if not resolving and not reviewing: next_portal = time.monotonic() + 30
+                if not resolving and not reviewing and not automatic: next_portal = time.monotonic() + 30
             if leased and time.monotonic() - last_health >= 10:
                 pulse()
                 try:

@@ -17,6 +17,8 @@ import portal_state
 import portal_pins
 import portal_review
 import wan_lease
+import portal_auto
+import portal_known
 
 ROOT = Path('/run/roadlink-wan')
 NS = 'roadlink-wan'
@@ -155,11 +157,38 @@ def review_session(request):
         raise RuntimeError('Portal review vehicle WLAN changed')
 
 
-def main(resolve_targets=False, review_form=False):
+def main(resolve_targets=False, review_form=False, auto_form=False):
     context = None
     request = None
     try:
         context = Context()
+        if auto_form:
+            import portal_session_runtime
+            def check_auto():
+                context.check()
+                if portal_session_runtime.busy():raise RuntimeError('Manual portal session owns admission')
+                evidence=portal_state.current(load_json(ROOT/'portal-result.json',{}),context.binding,
+                    context.lease,context.hints,time.monotonic())
+                if not evidence or evidence.get('state') not in portal_state.CAPTIVE or evidence.get('url')!=url:
+                    raise RuntimeError('Automatic portal evidence changed')
+            evidence=portal_state.current(load_json(ROOT/'portal-result.json',{}),context.binding,
+                context.lease,context.hints,time.monotonic())
+            if not evidence or not evidence.get('url'):return
+            url=evidence['url'];radio=context.radio_identity();store=portal_known.KnownPortals()
+            check_auto()
+            if not portal_auto.pending(evidence,radio,store,load_json(ROOT/'portal-auto-result.json',{}),context.binding,context.lease):return
+            selected=portal_auto.eligible(url,radio,store)
+            marker={'state':'STARTED','connection':context.binding,
+                'lease':{k:context.lease[k] for k in ('address','gateway')},
+                'fingerprint':selected[1]['fingerprint'],'target_hash':portal_known.digest(url),'checked_at':time.monotonic()}
+            write_json(ROOT/'portal-auto-result.json',marker)  # Precedes GET and any possible action.
+            class Bound:
+                def __getattr__(self,name):return getattr(context,name)
+                def check(self):check_auto()
+            result=portal_auto.attempt(url,Bound(),radio,store)
+            context.check()
+            write_json(ROOT/'portal-auto-result.json',dict(marker,**result))
+            return
         if review_form:
             request = load_json(ROOT/'portal-review-request.json', {})
             def check_session():
@@ -203,7 +232,11 @@ def main(resolve_targets=False, review_form=False):
             hint_hash=portal_state.hint_hash(context.hints)))
     except (ValueError, OSError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError):
         # Neither hostile response bodies nor session URLs enter diagnostics.
-        if context is not None and review_form and request is not None:
+        if context is not None and auto_form:
+            # Retain STARTED even on an uncertain POST response/crash. Neither
+            # an exception nor a timeout may silently trigger a second action.
+            pass
+        elif context is not None and review_form and request is not None:
             try:
                 context.check()
                 if load_json(ROOT/'portal-review-request.json', {}) == request:
@@ -231,5 +264,6 @@ if __name__ == '__main__':
     if len(sys.argv) == 2 and sys.argv[1] == 'cleanup': cleanup()
     elif len(sys.argv) == 2 and sys.argv[1] == 'resolve': main(resolve_targets=True)
     elif len(sys.argv) == 2 and sys.argv[1] == 'review': main(review_form=True)
+    elif len(sys.argv) == 2 and sys.argv[1] == 'auto': main(auto_form=True)
     elif len(sys.argv) == 1: main()
     else: raise ValueError('Unexpected portal command')
