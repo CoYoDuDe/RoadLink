@@ -10,6 +10,8 @@ import portal_request
 import portal_session
 import portal_session_runtime as runtime
 import portal_state
+import portal_pins
+import portal_review
 from storage import load_json
 
 
@@ -39,12 +41,32 @@ class Manager:
         try:return portal_live.system().inspect()
         except Exception:return None
 
+    def form_status(self, view):
+        if view is None: return ''
+        try:
+            session=load_json(runtime.ROOT/'session.json',{})
+            portal_session.validate(session,*view,time.monotonic(),self.alive)
+            portal_request.check(session,self.alive)
+            if runtime.stopped() or not all(self.alive(load_json(runtime.ROOT/(name+'.json'),{}))
+                                           for name in ('controller','guard')):
+                return ''
+            request=load_json(runtime.WAN/'portal-review-request.json',{})
+            if portal_pins.request(session)!=request:return ''
+            wan=view[1]
+            result=portal_review.current(request,load_json(runtime.WAN/'portal-review-result.json',{}),
+                wan['connection'],wan['lease'],wan['hints'],view[2],time.monotonic())
+            return {'OBSERVED':'Formular erkannt; manuell anmelden',
+                    'MANUAL_REQUIRED':'Seite im Browser pruefen',
+                    'UNAVAILABLE':'Pruefung nicht moeglich; Browser nutzen'}.get((result or {}).get('state'),'Noch nicht geprueft')
+        except (ValueError,RuntimeError,KeyError,TypeError,OSError):return ''
+
     def update(self,enabled=True):
         self.known_api.update()
         if self.worker and self.worker.poll() is not None:self.worker=None
         if not enabled:
             self.cancel()
             self.api.refresh(None,'STOPPING' if self.busy() else 'OFF')
+            self.api.service['/Portal/FormStatus']=''
             return
         view=self.view()
         intent=self.api.take()
@@ -63,3 +85,4 @@ class Manager:
         status=load_json(runtime.ROOT/'status.json',{}).get('state','OFF')
         if self.worker and self.worker.poll() is None and status=='OFF':status='STARTING'
         self.api.refresh(view,status)
+        self.api.service['/Portal/FormStatus']=self.form_status(view)

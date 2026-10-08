@@ -17,7 +17,7 @@ class API:
         self.additional=[]
         self.extra_generation=None
         for path,value in {'Available':0,'Devices':'[]','SelectedDevice':'','URL':'',
-                           'Status':'Keine WLAN-Anmeldung erforderlich','State':'OFF','EditStatus':''}.items():
+                           'Status':'Keine WLAN-Anmeldung erforderlich','State':'OFF','EditStatus':'','FormStatus':''}.items():
             service.add_path('/Portal/'+path,value,writeable=path=='SelectedDevice',
                              **({'onchangecallback':self.choose} if path=='SelectedDevice' else {}))
         service.add_path('/Portal/AdditionalDomains','',writeable=True,onchangecallback=self.approve)

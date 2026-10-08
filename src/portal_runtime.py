@@ -15,6 +15,7 @@ import portal_fetch
 import portal_legacy
 import portal_state
 import portal_pins
+import portal_review
 import wan_lease
 
 ROOT = Path('/run/roadlink-wan')
@@ -113,11 +114,43 @@ class Context:
             cleanup()
 
 
-def main(resolve_targets=False):
+def review_session(request):
+    """Recheck the manual session's live owners and immutable daemon intent."""
+    import portal_request
+    import portal_session_runtime as session_runtime
+    session_runtime.private_root()
+    session = load_json(session_runtime.ROOT/'session.json', {})
+    if portal_pins.request(session) != request:
+        raise RuntimeError('Portal review session changed')
+    portal_request.check(session, alive)
+    if session_runtime.stopped() or not all(alive(load_json(session_runtime.ROOT/(name+'.json'), {}))
+                                          for name in ('controller', 'guard')):
+        raise RuntimeError('Portal review session stopped')
+    ap_root = Path('/run/roadlink-ap')
+    if (any((ap_root/name).exists() for name in ('stop', 'cleaning'))
+            or any(load_json(ap_root/(name+'.json'), {}) != session['ap'][name]
+                   or not alive(session['ap'][name]) for name in ('controller', 'guard'))
+            or load_json(ap_root/'radio.json', {}).get('ap_ifindex') != session['ap']['ifindex']):
+        raise RuntimeError('Portal review vehicle WLAN changed')
+
+
+def main(resolve_targets=False, review_form=False):
     context = None
     request = None
     try:
         context = Context()
+        if review_form:
+            request = load_json(ROOT/'portal-review-request.json', {})
+            def check_session():
+                if load_json(ROOT/'portal-review-request.json', {}) != request:
+                    raise RuntimeError('Portal review request revoked')
+                review_session(request)
+            result = portal_review.inspect(request, context,
+                lambda: load_json(ROOT/'portal-result.json', {}), check_session)
+            context.check()
+            check_session()
+            write_json(ROOT/'portal-review-result.json', result)
+            return
         if resolve_targets:
             request = load_json(ROOT/'portal-resolve-request.json', {})
             result = portal_pins.resolve(request, context, load_json(ROOT/'portal-result.json', {}))
@@ -147,9 +180,17 @@ def main(resolve_targets=False):
         write_json(ROOT / 'portal-result.json', dict(result, connection=context.binding,
             lease={key: context.lease[key] for key in ('address', 'gateway')}, checked_at=time.monotonic(),
             hint_hash=portal_state.hint_hash(context.hints)))
-    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError):
+    except (ValueError, OSError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError):
         # Neither hostile response bodies nor session URLs enter diagnostics.
-        if context is not None and resolve_targets and request is not None:
+        if context is not None and review_form and request is not None:
+            try:
+                context.check()
+                if load_json(ROOT/'portal-review-request.json', {}) == request:
+                    review_session(request)
+                    write_json(ROOT/'portal-review-result.json', {'state': 'UNAVAILABLE',
+                        'request_hash': portal_review.digest(request), 'checked_at': time.monotonic()})
+            except (ValueError, OSError, RuntimeError, KeyError, subprocess.SubprocessError): pass
+        elif context is not None and resolve_targets and request is not None:
             try:
                 context.check()
                 if load_json(ROOT/'portal-resolve-request.json', {}) == request:
@@ -168,5 +209,6 @@ if __name__ == '__main__':
     import sys
     if len(sys.argv) == 2 and sys.argv[1] == 'cleanup': cleanup()
     elif len(sys.argv) == 2 and sys.argv[1] == 'resolve': main(resolve_targets=True)
+    elif len(sys.argv) == 2 and sys.argv[1] == 'review': main(review_form=True)
     elif len(sys.argv) == 1: main()
     else: raise ValueError('Unexpected portal command')

@@ -63,6 +63,11 @@ MbPage {
             item.bind: "com.coyodude.roadlink/Portal/URL"
             show: root.state.value === "LOGIN_READY"
         }
+        MbItemValue {
+            description: qsTr("Formularpruefung")
+            item.bind: "com.coyodude.roadlink/Portal/FormStatus"
+            show: root.state.value === "LOGIN_READY"
+        }
         MbItemText {
             text: qsTr("Diese Adresse im Browser des ausgewaehlten Fahrzeuggeraets oeffnen.")
             wrapMode: Text.WordWrap

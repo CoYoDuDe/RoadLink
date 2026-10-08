@@ -52,6 +52,8 @@ Benötigt die Seite weitere Domains, vor dem Start bis zu drei davon mit Komma g
 
 **Bekannte Portale automatisch** startet mit **Ein**. Unter **Bekannte Portale** kann die Einstellung je bestätigtem Profil geändert werden. Die Schalter und Profilspeicherung sind vorhanden; das Erfassen erfolgreicher manueller Anmeldungen und die automatische Anmeldung werden noch entwickelt. Der Schalter allein bestätigt keine Bedingungen und schaltet kein Internet frei. Geänderte Bedingungen, Zahlung, SMS, CAPTCHA oder persönliche Angaben erfordern eine manuelle Prüfung.
 
+Bei gestarteter Anmeldung prüft RoadLink die Seite und zeigt den Stand unter **Formularprüfung**. Diese Prüfung meldet niemanden an und bestätigt keine Bedingungen.
+
 Die Prüfung mit echten öffentlichen Portalen ist noch offen. Starlink-Bypass erst nach abgeschlossener Gesamtprüfung verwenden.
 
 ## Verbindungsmodi

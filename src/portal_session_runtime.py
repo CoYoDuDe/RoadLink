@@ -134,6 +134,10 @@ def cleanup(lock_fd,ns_fd,session):
     network.cleanup()
     request=load_json(WAN/'portal-resolve-request.json',{})
     if request.get('id')==session['id']: write_json(WAN/'portal-resolve-request.json',{})
+    request=load_json(WAN/'portal-review-request.json',{})
+    if request.get('id')==session['id']:
+        write_json(WAN/'portal-review-request.json',{})
+        write_json(WAN/'portal-review-result.json',{})
     write_json(ROOT/'status.json',{'state':'OFF','internet':False})
     write_json(ROOT/'result.json',{'cleaned':True,'errors':[]})
 
@@ -246,6 +250,9 @@ def run(device_id,expected=None):
         def request(value):
             check()
             write_json(WAN/'portal-resolve-request.json',value)
+            if load_json(WAN/'portal-review-request.json',{}) != value:
+                write_json(WAN/'portal-review-result.json',{})
+                write_json(WAN/'portal-review-request.json',value)
             check()
         access=portal_access_session.Access(session,check,lambda:load_json(WAN/'portal-pins.json',{}),
                                            request,network,portal_dns_server.Broker)
