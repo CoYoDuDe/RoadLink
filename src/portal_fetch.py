@@ -16,8 +16,15 @@ class Incomplete(ValueError):
     pass
 
 
-def decode(raw, closed=False):
-    if not isinstance(raw, bytes) or len(raw) > MAX_WIRE: raise ValueError('Portal response too large')
+def limits(body_limit, wire_limit):
+    if (type(body_limit) is not int or type(wire_limit) is not int
+            or not 1 <= body_limit <= 65536 or not body_limit + 4 <= wire_limit <= 98304):
+        raise ValueError('Invalid portal response budgets')
+
+
+def decode(raw, closed=False, *, body_limit=MAX_BODY, wire_limit=MAX_WIRE):
+    limits(body_limit, wire_limit)
+    if not isinstance(raw, bytes) or len(raw) > wire_limit: raise ValueError('Portal response too large')
     marker = raw.find(b'\r\n\r\n')
     if marker < 0:
         if len(raw) > 8192 or closed: raise ValueError('Invalid portal headers')
@@ -65,20 +72,20 @@ def decode(raw, closed=False):
                 if end != offset or len(body) != offset+2: raise ValueError('Unexpected portal trailer/data')
                 body = bytes(decoded)
                 break
-            if len(decoded) + size > MAX_BODY: raise ValueError('Portal body too large')
+            if len(decoded) + size > body_limit: raise ValueError('Portal body too large')
             if len(body) < offset+size+2:
                 if closed: raise ValueError('Incomplete chunk data')
                 raise Incomplete()
             if body[offset+size:offset+size+2] != b'\r\n': raise ValueError('Invalid chunk ending')
             decoded.extend(body[offset:offset+size]); offset += size+2
     elif length is not None:
-        if not re.fullmatch(rb'[0-9]{1,10}', length) or int(length) > MAX_BODY: raise ValueError('Invalid portal length')
+        if not re.fullmatch(rb'[0-9]{1,10}', length) or int(length) > body_limit: raise ValueError('Invalid portal length')
         if len(body) < int(length):
             if closed: raise ValueError('Incomplete portal body')
             raise Incomplete()
         if len(body) != int(length): raise ValueError('Trailing portal data')
     else:
-        if len(body) > MAX_BODY: raise ValueError('Portal body too large')
+        if len(body) > body_limit: raise ValueError('Portal body too large')
         if not closed: raise Incomplete()
     return {'status': int(match[1]), 'content_type': fields.get(b'content-type', b'').decode('ascii'),
             'location': fields.get(b'location', b'').decode('ascii'), 'body': body}
@@ -94,14 +101,15 @@ def request(url):
             + '\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n').encode('ascii')
 
 
-def receive(sock, check, deadline):
+def receive(sock, check, deadline, *, body_limit=MAX_BODY, wire_limit=MAX_WIRE):
+    limits(body_limit, wire_limit)
     raw = bytearray()
     while True:
         sock.settimeout(remaining(deadline, check))
-        chunk = sock.recv(min(4096, MAX_WIRE+1-len(raw)))
+        chunk = sock.recv(min(4096, wire_limit+1-len(raw)))
         raw.extend(chunk)
         try:
-            value = decode(bytes(raw), closed=not chunk)
+            value = decode(bytes(raw), closed=not chunk, body_limit=body_limit, wire_limit=wire_limit)
             check()
             return value
         except Incomplete:
