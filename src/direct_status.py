@@ -64,6 +64,9 @@ def current(subnet, settings, alive, root=ROOT, ap_root=AP_ROOT, wan_root=WAN_RO
     status = load_json(root / 'status.json', {})
     wan_state = load_json(wan_root / 'status.json', {})
     config = verified(status, subnet, settings, ap, wan, wan_state, time.monotonic())
+    from firewall_guard import matches
+    if config and not matches(config):
+        return None
     required = [(root, values), (ap_root, ap)]
     if config and config['kind'] == 'wifi':
         required.append((wan_root, wan))

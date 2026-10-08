@@ -23,6 +23,7 @@ from policy import Selector, Link
 from wan_config import wan_mode
 from direct_policy import Policy
 import direct_router as routing
+import firewall_guard
 from runtime_lock import busy as runtime_locked
 
 ROOT = Path('/run/roadlink-direct')
@@ -123,6 +124,7 @@ def owners(root):
 
 def serve(parent_pid, parent_start):
     global LOCK_FD
+    firewall = firewall_guard.snapshot()
     if os.geteuid() != 0 or transport_settings()['vpn_required']:
         raise RuntimeError('Explicit direct transport choice is required')
     if (Path('/sys/class/net/wgroadlink').exists()
@@ -164,6 +166,7 @@ def serve(parent_pid, parent_start):
         signal.signal(signal.SIGTERM, lambda *_: (ROOT / 'stop').touch())
         while (not (ROOT / 'stop').exists() and alive({'pid': parent_pid, 'start': parent_start})
                and not transport_settings()['vpn_required']):
+            firewall_guard.require(firewall)
             if not alive(load_json(ROOT / 'guard.json', {})):
                 raise RuntimeError('Direct cleanup guard lost')
             policy.verify(active_config)
@@ -180,7 +183,7 @@ def serve(parent_pid, parent_start):
                 health[kind] = {'healthy': False, 'score': 0}
                 if route is None:
                     continue
-                config = routing.plan(subnet or '172.27.88.0/24', dict(route, kind=kind), settings['dns'])
+                config = routing.plan(subnet or '172.27.88.0/24', dict(route, kind=kind, firewall=firewall), settings['dns'])
                 policy.route(routing.TABLE, config)
                 pulse()
                 dns = choose(dict(settings, address=config['source']), lambda source, resolver:
@@ -203,10 +206,12 @@ def serve(parent_pid, parent_start):
             context = (ap_owners, wan_owners if selected == 'wifi' else None)
             if desired != active_config or context != active_context:
                 policy.block()
+                firewall_guard.require(firewall)
                 if desired:
                     policy.activate(desired)
                 active_config, active_context = desired, context
             policy.verify(active_config)
+            firewall_guard.require(firewall)
             write_json(ROOT / 'status.json', {'state': 'READY' if desired else 'CONNECTING',
                        'internet': bool(desired), 'dns_ready': bool(desired), 'dns': desired['dns'] if desired else '',
                        'generation': routing.generation(desired) if desired else '',
@@ -218,6 +223,8 @@ def serve(parent_pid, parent_start):
                        'wifi_lease': wan.get('lease') if selected == 'wifi' else None})
             pulse()
             time.sleep(2)
+    except firewall_guard.Changed:
+        pass  # an ordinary policy edit is a controlled handover
     finally:
         (ROOT / 'stop').touch()  # independent guard owns all final cleanup
         if not alive(load_json(ROOT / 'guard.json', {})):

@@ -132,13 +132,14 @@ class Policy:
 
     def activate(self, config):
         config = routing.plan(config['subnet'], config, config['dns'])
+        planned_rules = list(routing.rules(config))
         self.block()
         if not covered(self.command):
             raise RuntimeError('AP base firewall is unavailable')
         state = self.state()
         state['configs'] = [config]
         self.journal(state)  # records even an interrupted partial ruleset
-        for rule in routing.rules(config):
+        for rule in planned_rules:
             self.command(routing.rule_command('-I', rule))
         self.command(['sysctl', '-qw', 'net.ipv4.ip_forward=1'])
         self.route(routing.AP_TABLE, config)  # only after all filtering is ready

@@ -14,3 +14,6 @@
 /opt/victronenergy/gui/qml/PageRoadLinkPortal.qml
 /opt/victronenergy/gui/qml/PageRoadLinkPortalDevices.qml
 /opt/victronenergy/gui/qml/PageRoadLinkKnownPortals.qml
+/opt/victronenergy/gui/qml/PageRoadLinkFirewall.qml
+/opt/victronenergy/gui/qml/PageRoadLinkFirewallRules.qml
+/opt/victronenergy/gui/qml/PageRoadLinkFirewallEdit.qml

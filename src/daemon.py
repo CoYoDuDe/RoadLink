@@ -47,6 +47,7 @@ import radio_roles
 from radio_api import install as install_radio_api
 from runtime_lock import busy as runtime_locked
 import ipaddress
+import firewall_config
 
 
 def main():
@@ -113,6 +114,8 @@ def main():
     install_dns_api(service)
     install_transport_api(service)
     install_radio_api(service)
+    from firewall_api import API as FirewallAPI
+    firewall_api = FirewallAPI(service, itemtype=SecretItem)
     from portal_manager import Manager as PortalManager
     portal_manager=PortalManager(service,{'pid':os.getpid(),'start':token(os.getpid())},alive,SecretItem)
     service.register()
@@ -166,10 +169,15 @@ def main():
         nonlocal direct_worker, direct_signature, direct_retry_at
         try:
             import time
+            firewall_api.update()
             safe_mode = Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()
             try:
                 role_config = radio_roles.read()
                 radio_key = radio_roles.generation(role_config)
+                # Policy edits use the same fully drained transport handover.
+                # A malformed private policy selects off; never default allow.
+                firewall = firewall_config.read()
+                radio_key = (radio_key, firewall_config.generation(firewall))
                 use_vpn = transport_settings()['vpn_required']
                 wanted = 'off' if safe_mode else 'vpn' if use_vpn else 'direct'
             except (ValueError, OSError):

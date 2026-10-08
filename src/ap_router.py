@@ -15,7 +15,7 @@ PRIVATE = ('0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8',
            '224.0.0.0/4', '240.0.0.0/4')
 
 
-def plan(subnet, vpn):
+def plan(subnet, vpn, firewall=None):
     network = ipaddress.ip_network(subnet)
     address = ipaddress.ip_interface(vpn['address'])
     dns = ipaddress.ip_address(vpn['dns'])
@@ -28,6 +28,9 @@ def plan(subnet, vpn):
             or network.overlaps(address.network) or dns in network):
         raise ValueError('Invalid or overlapping AP/VPN addressing')
     result = {'subnet': str(network), 'address': str(address.ip), 'dns': str(dns)}
+    if firewall is not None:
+        from firewall_config import validate
+        result['firewall'] = validate(firewall)
     # Android strict Private DNS keeps the public hostname for TLS verification.
     # Only DNSmith's own public endpoint maps to its isolated in-tunnel resolver.
     from dns_config import PUBLIC_DNSMITH
@@ -38,12 +41,15 @@ def plan(subnet, vpn):
 
 
 def rules(config):
+    from firewall_rules import rules as custom_rules
+    custom = list(custom_rules(config['firewall'], config['subnet'], VPN, TAG)) if 'firewall' in config else []
     tag = ['-m', 'comment', '--comment', TAG]
     # Rules are inserted at position 1 in this order, so terminal allowances
     # remain below private-destination and DNS restrictions.
     yield ('filter', 'FORWARD', ['-i', AP, '-s', config['subnet'], '-o', VPN] + tag + ['-j', 'ACCEPT'])
     yield ('filter', 'FORWARD', ['-i', VPN, '-o', AP, '-d', config['subnet'],
            '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED'] + tag + ['-j', 'ACCEPT'])
+    yield from custom
     for destination in PRIVATE:
         yield ('filter', 'FORWARD', ['-i', AP, '-d', destination] + tag + ['-j', 'DROP'])
     for protocol in ('tcp', 'udp'):
@@ -73,6 +79,9 @@ def rule_command(action, rule):
 
 
 def start(root, config, command):
+    # Validate the complete ruleset before creating any routing journal.
+    # An invalid client after a subnet change must leave no uncleanable entry.
+    planned_rules = list(rules(config))
     if (PRIORITY + ':' in command(['ip', 'rule', 'show']).stdout
             or command(['ip', 'route', 'show', 'table', TABLE], check=False).stdout.strip()):
         raise RuntimeError('AP routing priority/table already occupied')
@@ -81,7 +90,7 @@ def start(root, config, command):
     # The journal precedes all mutations. Independent AP cleanup owns them.
     command(['ip', 'route', 'add', 'unreachable', 'default', 'metric', '32767', 'table', TABLE])
     command(['ip', 'rule', 'add', 'priority', PRIORITY, 'iif', AP, 'lookup', TABLE])
-    for rule in rules(config):
+    for rule in planned_rules:
         command(rule_command('-I', rule))
     Path('/proc/sys/net/ipv4/ip_forward').write_text('1\n')
     reconcile(command)

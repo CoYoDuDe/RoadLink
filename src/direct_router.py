@@ -50,8 +50,12 @@ def plan(subnet, route, dns):
     if (ipaddress.IPv4Address(source) in network
             or gateway and (ipaddress.IPv4Address(gateway) in network or gateway == source)):
         raise ValueError('Direct uplink overlaps the vehicle network')
-    return {'subnet': str(network), 'dev': route['dev'], 'source': source,
-            'gateway': gateway, 'kind': route['kind'], 'dns': public_address(dns)}
+    result = {'subnet': str(network), 'dev': route['dev'], 'source': source,
+              'gateway': gateway, 'kind': route['kind'], 'dns': public_address(dns)}
+    if 'firewall' in route:
+        from firewall_config import validate
+        result['firewall'] = validate(route['firewall'])
+    return result
 
 
 def generation(config):
@@ -85,6 +89,8 @@ def routes(config):
 def rules(config):
     """iptables -I CHAIN 1 insertion order. Existing AP local rules stay intact."""
     config = plan(config['subnet'], config, config['dns'])
+    from firewall_rules import rules as custom_rules
+    custom = list(custom_rules(config['firewall'], config['subnet'], config['dev'], TAG)) if 'firewall' in config else []
     tag = ['-m', 'comment', '--comment', TAG]
     outgoing = ['-i', AP, '-s', config['subnet'], '-o', config['dev']]
     # The controller adds allowances only for a checked path. These explicit
@@ -94,10 +100,14 @@ def rules(config):
     yield ('filter', 'FORWARD', outgoing + tag + ['-j', 'ACCEPT'])
     yield ('filter', 'FORWARD', ['-i', config['dev'], '-o', AP, '-d', config['subnet'],
            '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED'] + tag + ['-j', 'ACCEPT'])
+    yield from custom
     for destination in PRIVATE:
         yield ('filter', 'FORWARD', ['-i', AP, '-d', destination] + tag + ['-j', 'DROP'])
     for protocol in ('udp', 'tcp'):
         yield ('filter', 'FORWARD', ['-i', AP, '-p', protocol, '--dport', '853'] + tag + ['-j', 'DROP'])
+        if 'firewall' in config:
+            yield ('filter', 'FORWARD', outgoing + ['-d', config['dns'], '-p', protocol,
+                   '--dport', '53'] + tag + ['-j', 'ACCEPT'])
         yield ('nat', 'PREROUTING', ['-i', AP, '-s', config['subnet'], '-p', protocol,
                '--dport', '53'] + tag + ['-j', 'DNAT', '--to-destination', config['dns']])
     yield ('nat', 'POSTROUTING', ['-s', config['subnet'], '-o', config['dev']] + tag +

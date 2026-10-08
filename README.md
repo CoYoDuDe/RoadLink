@@ -80,6 +80,10 @@ Unter **Internet und Umschaltung** ist **Internet über VPN** standardmäßig ei
 
 Beim Wechsel beendet RoadLink zunächst den bisherigen Modus und prüft dessen Bereinigung. Erst danach startet der gewählte Modus. VPN-Profile und Schlüssel bleiben gespeichert. Scheitert die Bereinigung, startet der neue Modus nicht. Ein VPN-Ausfall schaltet niemals automatisch auf unverschlüsselten Betrieb um. Bei DNSmith-DNS verwendet der direkte Betrieb dessen öffentliche Adresse; eigene primäre und sekundäre DNS-Adressen bleiben unabhängig einstellbar.
 
+Unter **RoadLink → Firewall** lassen sich eigene Regeln für ausgehendes Internet anlegen, bearbeiten, sortieren und löschen. Die erste passende eigene Regel gilt. Ohne passende Regel ist Internet standardmäßig erlaubt; als Standard lässt sich auch **Sperren** wählen. Leere Geräte- und Zielfelder gelten für alle Geräte beziehungsweise Ziele. Eine Geräte-IP muss zum aktuellen Fahrzeugnetz gehören; bei geänderter DHCP-Adresse die Regel anpassen. Ziele sind öffentliche IPv4-Adressen oder Netze. Port **0** bedeutet alle Ports; einzelne Ports benötigen TCP oder UDP.
+
+Die Trennung von fremden und privaten Netzen, der ausgewählte DNS und der VPN-Schutz sind fest und haben Vorrang. Eigene Regeln können sie nicht aufheben. Änderungen starten die Netzwerkdienste kontrolliert neu; die lokale Ethernet-Verwaltung bleibt erhalten. **Gespeichert** bedeutet noch nicht **Aktiv**: RoadLink zeigt den nachgewiesenen Betrieb getrennt an. Beschädigte Einstellungen sperren Internet bis zur Korrektur. Die Regeln liegen nur auf dem Gerät und bleiben bei einer Deinstallation gespeichert. Die Firewall der DNSmith-Server wird getrennt verwaltet.
+
 | Modus | Verhalten |
 |---|---|
 | AUTO | Ethernet bevorzugen, bei Ausfall geeignetes WLAN nutzen |

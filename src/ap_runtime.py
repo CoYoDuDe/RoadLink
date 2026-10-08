@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from ap_config import hostapd, isolated_dhcp, choose_subnet
+import firewall_guard
 from hardware import inspect_interfaces, capabilities
 import radio_roles
 import ap_radio
@@ -186,6 +187,7 @@ def stop():
 
 def _serve(ssid, parent_pid, parent_start, role_settings=None):
     global LOCK_FD
+    firewall = firewall_guard.snapshot()
     command = globals()['command']
     role_settings = dict(radio_roles.DEFAULT) if role_settings is None else radio_roles.validate(role_settings)
     if radio_roles.read() != role_settings:
@@ -224,7 +226,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
     use_vpn = transport_settings()['vpn_required']
     vpn = vpn_config() if use_vpn else None
     vpn_status = load_json(Path('/run/roadlink-vpn/status.json'), {})
-    routing = ap_router.plan(subnet, routed_dns(vpn, vpn_status)) if vpn and vpn['enabled'] else None
+    routing = ap_router.plan(subnet, routed_dns(vpn, vpn_status), firewall) if vpn and vpn['enabled'] else None
     config += 'ctrl_interface=' + str(ROOT / 'control') + '\n'
     atomic_write(ROOT / 'hostapd.conf', config.encode())
     dhcp = isolated_dhcp(INTERFACE, subnet).replace('/run/roadlink/ap.leases', str(ROOT / 'leases'))
@@ -250,6 +252,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
     command(['sysctl', '-qw', 'net.ipv6.conf.' + INTERFACE + '.disable_ipv6=1'])
     command(['ip', 'addr', 'add', address + '/24', 'dev', INTERFACE])
     command(['ip', 'link', 'set', INTERFACE, 'up'])
+    firewall_guard.require(firewall)
     if routing:
         ap_router.start(ROOT, routing, command)
     initial_vpn = load_json(Path('/run/roadlink-vpn/status.json'), {})
@@ -275,6 +278,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
         if not (ROOT / 'cleaning').exists() and (ap.poll() is not None or dhcp_process.poll() is not None):
             (ROOT / 'stop').touch()
         if not (ROOT / 'stop').exists():
+            firewall_guard.require(firewall)
             if transport_settings()['vpn_required'] != use_vpn or radio_roles.read() != role_settings:
                 (ROOT / 'stop').touch()
                 continue
@@ -314,9 +318,11 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
                                       '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
                 advertised_dns = desired_dns
                 advertised_portal=desired_portal
+            firewall_guard.require(firewall)
             write_json(ROOT / 'status.json', {'state': ('VPN_INTERNET' if use_vpn else 'DIRECT_INTERNET') if internet else
                        'LAN_ONLY' if ready else 'STARTING', 'address': address,
-                       'ssid': ssid, 'internet': internet, 'dns': advertised_dns or ''})
+                       'ssid': ssid, 'internet': internet, 'dns': advertised_dns or '',
+                       'firewall_generation': firewall_guard.firewall_config.generation(firewall)})
         time.sleep(2)
     ap.wait(timeout=5)
     dhcp_process.wait(timeout=5)
@@ -325,6 +331,8 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
 def serve(ssid, parent_pid, parent_start, role_settings=None):
     try:
         return _serve(ssid, parent_pid, parent_start, role_settings)
+    except firewall_guard.Changed:
+        return
     finally:
         controller = load_json(ROOT / 'controller.json', {})
         if controller.get('pid') == os.getpid() and alive(controller):
