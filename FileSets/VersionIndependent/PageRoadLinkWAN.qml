@@ -9,6 +9,13 @@ MbPage {
         MbItemText { text: qsTr("Ohne VPN keine Tunnelverschluesselung."); show: vpnRequired.value === 0 }
         MbSubMenu { description: qsTr("VPN-Anbieter"); show: vpnRequired.value === 1; subpage: Component { PageRoadLinkVPN {} } }
         MbSubMenu { description: qsTr("DNS-Anbieter"); subpage: Component { PageRoadLinkDNS {} } }
+        MbSwitch {
+            name: qsTr("Starlink-App ueber LAN")
+            bind: "com.victronenergy.settings/Settings/RoadLink/Starlink/LocalAccess"
+            valueTrue: 1; valueFalse: 0
+            writeAccessLevel: User.AccessInstaller
+        }
+        MbItemText { text: qsTr("Nur einschalten, wenn Starlink am LAN-Anschluss steckt.") }
         MbItemOptions {
             description: qsTr("Verbindungsmodus")
             bind: "com.victronenergy.settings/Settings/RoadLink/Wan/Mode"

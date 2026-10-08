@@ -21,6 +21,7 @@ from dns_config import read as dns_settings
 from transport_config import read as transport_settings
 from direct_status import current as direct_current
 import ap_router
+import starlink_local
 from runtime_lock import busy as runtime_locked
 
 ROOT = Path('/run/roadlink-ap')
@@ -112,6 +113,7 @@ def cleanup():
         except Exception as exc:
             errors.append(str(exc))
     if not errors:
+        errors.extend(starlink_local.cleanup(ROOT, command))
         errors.extend(ap_router.cleanup(ROOT, command))
         for rule in reversed(list(rules())):
             command([rule[0], '-w', '3', '-D', *rule[1:]], check=False)
@@ -185,7 +187,7 @@ def stop():
     raise RuntimeError('AP cleanup is incomplete; refusing installation/uninstall')
 
 
-def _serve(ssid, parent_pid, parent_start, role_settings=None):
+def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=False):
     global LOCK_FD
     firewall = firewall_guard.snapshot()
     command = globals()['command']
@@ -255,6 +257,8 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
     firewall_guard.require(firewall)
     if routing:
         ap_router.start(ROOT, routing, command)
+    if local_starlink:
+        starlink_local.start(ROOT, subnet, command)
     initial_vpn = load_json(Path('/run/roadlink-vpn/status.json'), {})
     advertised_dns = (routing['dns'] if routing and dns_ready(vpn, initial_vpn)
                       and routing['dns'] == initial_vpn.get('dns')
@@ -290,6 +294,8 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
             vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
             if routing:
                 ap_router.reconcile(command)
+            if local_starlink:
+                starlink_local.refresh(ROOT, command)
             internet = bool(ready and routing and dns_ready(vpn, vpn_state)
                             and routing['dns'] == vpn_state.get('dns')
                             and alive(load_json(Path('/run/roadlink-vpn/controller.json'), {}))
@@ -328,9 +334,9 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None):
     dhcp_process.wait(timeout=5)
 
 
-def serve(ssid, parent_pid, parent_start, role_settings=None):
+def serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=False):
     try:
-        return _serve(ssid, parent_pid, parent_start, role_settings)
+        return _serve(ssid, parent_pid, parent_start, role_settings, local_starlink)
     except firewall_guard.Changed:
         return
     finally:
@@ -352,6 +358,7 @@ if __name__ == '__main__':
         stop()
     elif sys.argv[1] == 'serve':
         serve(sys.argv[2], int(sys.argv[3]), sys.argv[4],
-              {'vehicle_ap': sys.argv[5], 'usb_identity': sys.argv[6]} if len(sys.argv) > 6 else None)
+              {'vehicle_ap': sys.argv[5], 'usb_identity': sys.argv[6]} if len(sys.argv) > 6 else None,
+              len(sys.argv) > 7 and sys.argv[7] == '1')
     else:
         raise ValueError('Unknown AP command')

@@ -57,6 +57,7 @@ def main():
     settings = SettingsDevice(bus, {
         'ap_enabled': ['/Settings/RoadLink/AP/Enabled', 0, 0, 1],
         'ap_ssid': ['/Settings/RoadLink/AP/SSID', 'RoadLink', 0, 0],
+        'starlink_local': ['/Settings/RoadLink/Starlink/LocalAccess', 0, 0, 1],
         'wan_enabled': ['/Settings/RoadLink/WifiWan/Enabled', 0, 0, 1],
         'client_name': ['/Settings/RoadLink/WifiWan/ClientName', '', 0, 0],
         'auto_open': ['/Settings/RoadLink/WifiWan/AutoOpen', 0, 0, 1],
@@ -386,7 +387,8 @@ def main():
                     if path_state.get('internet') else 'Internet nicht bereit')
             requested = (bool(settings['ap_enabled']), str(settings['ap_ssid']),
                          AP_SECRET.stat().st_mtime_ns if AP_SECRET.exists() else 0,
-                         repr(routed_dns(configuration, vpn_state)) if use_vpn else 'direct', use_vpn)
+                         repr(routed_dns(configuration, vpn_state)) if use_vpn else 'direct', use_vpn,
+                         bool(settings['starlink_local']))
             if wanted == 'off':
                 requested = (False, *requested[1:])
             if requested != signature:
@@ -405,7 +407,8 @@ def main():
                     failed = None
                     worker = subprocess.Popen([sys.executable, str(Path(__file__).with_name('ap_runtime.py')),
                                                'serve', requested[1], str(os.getpid()), token(os.getpid()),
-                                               role_config['vehicle_ap'], role_config['usb_identity']])
+                                               role_config['vehicle_ap'], role_config['usb_identity'],
+                                               '1' if requested[-1] else '0'])
             ap_state = load_json(AP_ROOT / 'status.json', {})
             internet = bool(worker and ap_state.get('internet')
                             and vpn_worker and vpn_state.get('state') == 'READY')

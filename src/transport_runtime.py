@@ -2,10 +2,11 @@
 import json
 from pathlib import Path
 
-TABLES = ('51890', '51900', '51910', '51920', '51921', '51930')
-PRIORITIES = ('21790', '21810', '21820', '21890', '21900', '21760')
+TABLES = ('51890', '51900', '51910', '51920', '51921', '51922', '51930')
+PRIORITIES = ('21790', '21809', '21810', '21820', '21890', '21900', '21760')
 TAGS = ('roadlink-ap-owned', 'roadlink-ap-route-owned', 'roadlink-vpn-owned',
-        'roadlink-wan-bridge-owned', 'roadlink-direct-owned', 'roadlink-portal-client-owned')
+        'roadlink-wan-bridge-owned', 'roadlink-direct-owned', 'roadlink-portal-client-owned',
+        'roadlink-starlink-local-owned')
 
 
 def clear(command, namespace=Path('/run/netns/roadlink-wan')):

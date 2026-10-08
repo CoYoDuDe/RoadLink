@@ -40,6 +40,8 @@ Unter **Fahrzeug-WLAN → Fahrzeug-WLAN über** das integrierte WLAN oder den US
 - Aktives Netz, verbundenes WLAN und geprüften Internet-/DNS-Status im klassischen Venus-Menü sehen.
 - Automatische Umschaltung bei Ausfall mit verzögerter Rückkehr, damit die Verbindung nicht ständig wechselt.
 
+Für die Starlink-App im Fahrzeug-WLAN unter **Internet und Umschaltung → Starlink-App ueber LAN** den lokalen Zugang einschalten. Starlink muss am Ethernet-Anschluss des Pi hängen. Die Freigabe erlaubt nur die benötigten Verbindungen zur Antenne und zum eigenen Starlink-Router; andere private Netze bleiben gesperrt. Bei Neuinstallation ist der Schalter ausgeschaltet.
+
 **Standardmäßig erhält das Fahrzeug-WLAN Internet über den geprüften VPN-Tunnel.** Ein direkter Betrieb muss ausdrücklich gewählt werden. Eine WLAN-Verbindung oder IP-Adresse allein reicht nicht. Ethernet und SSH für den Gerätezugang bleiben erhalten. WLAN-Betreiber können weiterhin einen verbundenen Teilnehmer erkennen; RoadLink macht ihn nicht unsichtbar.
 
 ## WLAN-Anmeldung (in Entwicklung)
