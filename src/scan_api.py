@@ -21,7 +21,7 @@ def results():
 
 def install(service):
     service.add_path('/Wifi/Scan/Results', '[]')
-    service.add_path('/Wifi/Scan/Status', 'USB-WLAN-Reserve aktivieren')
+    service.add_path('/Wifi/Scan/Status', 'WLAN-Reserve aktivieren')
     service.add_path('/Wifi/Scan/Time', 0)
     service.add_path('/Wifi/Scan/Count', 0)
     pending = ['', 0, None]
@@ -30,7 +30,7 @@ def install(service):
         guard_info = load_json(ROOT / 'guard.json', {})
         if (not alive(guard_info) or not ROOT.exists()
                 or (ROOT / 'stop').exists() or (ROOT / 'cleaning').exists()):
-            service['/Wifi/Scan/Status'] = 'USB-WLAN-Reserve zuerst aktivieren'; return False
+            service['/Wifi/Scan/Status'] = 'WLAN-Reserve zuerst aktivieren'; return False
         if pending[0] and time.monotonic() - pending[1] < 140:
             scan = load_json(ROOT / 'scan.json', {})
             if scan.get('request') != pending[0] or scan.get('state') not in ('COMPLETE', 'FAILED'):
@@ -51,7 +51,7 @@ def install(service):
         service['/Wifi/Scan/Time'] = int(scan.get('timestamp', 0))
         service['/Wifi/Scan/Status'] = {'WAITING': 'Wartet auf freien Funk', 'SCANNING': 'Passive Suche laeuft',
              'COMPLETE': 'Suche abgeschlossen', 'FAILED': 'Suche fehlgeschlagen; erneut versuchen'}.get(
-             scan.get('state'), 'Bereit zur Suche' if guard else 'USB-WLAN-Reserve aktivieren')
+             scan.get('state'), 'Bereit zur Suche' if guard else 'WLAN-Reserve aktivieren')
         if guard and pending[0] and scan.get('request') != pending[0]:
             service['/Wifi/Scan/Status'] = 'Suche angefordert'
         if scan.get('state') == 'COMPLETE' and time.time() - scan.get('timestamp', 0) > 180:

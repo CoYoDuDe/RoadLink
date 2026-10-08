@@ -9,6 +9,7 @@ MbPage {
         MbSwitch { name: qsTr("WLAN-Reserve aktiv"); bind: "com.victronenergy.settings/Settings/RoadLink/WifiWan/Enabled"; writeAccessLevel: User.AccessInstaller }
         MbSwitch { name: qsTr("Offene WLANs automatisch pruefen"); bind: "com.victronenergy.settings/Settings/RoadLink/WifiWan/AutoOpen"; writeAccessLevel: User.AccessInstaller }
         MbItemValue { description: qsTr("Verbindung"); item.bind: "com.coyodude.roadlink/WifiWan/StateText" }
+        MbItemValue { description: qsTr("Funkmodul"); item.bind: "com.coyodude.roadlink/Radio/WanRadio" }
         MbItemValue { description: qsTr("WLAN-Name"); item.bind: "com.coyodude.roadlink/WifiWan/SSID" }
         MbEditBox {
             description: qsTr("Geraetename (optional)")

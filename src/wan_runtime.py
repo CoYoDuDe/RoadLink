@@ -10,7 +10,8 @@ import sys
 import time
 import secrets
 from ap_runtime import command, token, alive
-from hardware import inspect_interfaces, resolve_role, capabilities
+from hardware import inspect_interfaces, capabilities
+import radio_roles
 from profiles import Profiles
 from privacy import profile_mac
 from wan_scan import Scanner
@@ -26,10 +27,12 @@ from reserve_policy import Gate
 from wan_config import wan_mode
 import wan_bridge_runtime
 import owned_netns
+from runtime_lock import busy as runtime_locked
 
 ROOT = Path('/run/roadlink-wan')
 NS = 'roadlink-wan'
 RADIO = 'disabledrlwan'
+LOCK_FD = None
 
 
 def native_interfaces():
@@ -55,8 +58,8 @@ def tracked_command(args, check=True):
     controller = load_json(ROOT / 'controller.json', {})
     if controller.get('pid') == os.getpid() and not (ROOT / 'cleaning').exists():
         return subprocess.run([sys.executable, __file__, 'child', 'mutation', str(os.getpid()),
-                               token(os.getpid()), *args], capture_output=True, text=True,
-                              timeout=8, check=check)
+                               token(os.getpid()), str(LOCK_FD), *args], capture_output=True, text=True,
+                              timeout=8, check=check, pass_fds=(LOCK_FD,))
     return command(args, check=check)
 
 
@@ -167,38 +170,46 @@ def guard(pid, start, lock_fd):
     finally: os.close(lock_fd)
 
 
-def child(name, parent_pid, parent_start, args):
+def child(name, parent_pid, parent_start, lock_fd, args):
     if name not in ('supplicant', 'dhcp', 'mutation', 'scanner'): raise ValueError('Unknown WLAN child')
     write_json(ROOT / (name + '.json'), {'pid': os.getpid(), 'start': token(os.getpid())})
     if ((ROOT / 'stop').exists() or (ROOT / 'cleaning').exists()
-            or not alive({'pid': parent_pid, 'start': parent_start})):
+            or not alive({'pid': parent_pid, 'start': parent_start})
+            or not alive(load_json(ROOT / 'guard.json', {}))):
         return
+    os.set_inheritable(lock_fd, False)
     os.execvp(args[0], args)
 
 
 def launch(name, args, **kwargs):
     return subprocess.Popen([sys.executable, __file__, 'child', name, str(os.getpid()),
-                             token(os.getpid()), 'ip', 'netns', 'exec', NS, *args], stdin=subprocess.DEVNULL, **kwargs)
+                             token(os.getpid()), str(LOCK_FD), 'ip', 'netns', 'exec', NS, *args],
+                             stdin=subprocess.DEVNULL, pass_fds=(LOCK_FD,), **kwargs)
 
 
 def stop():
-    if not ROOT.exists(): return
-    (ROOT / 'stop').touch()
+    if not ROOT.exists() and not runtime_locked(ROOT): return
+    if ROOT.exists(): (ROOT / 'stop').touch()
     controller = load_json(ROOT / 'controller.json', {})
     if alive(controller): os.kill(controller['pid'], signal.SIGTERM)
     deadline = time.monotonic() + 25
     while time.monotonic() < deadline:
-        if (load_json(ROOT / 'result.json', {}).get('cleaned')
-                and not alive(load_json(ROOT / 'guard.json', {}))): return
+        if ((load_json(ROOT / 'result.json', {}).get('cleaned') or not ROOT.exists())
+                and not alive(load_json(ROOT / 'guard.json', {})) and not runtime_locked(ROOT)): return
         time.sleep(.2)
     raise RuntimeError('WAN cleanup incomplete; refusing package changes')
 
 
-def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=False):
+def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=False, role_settings=None):
+    global LOCK_FD
+    role_settings = dict(radio_roles.DEFAULT) if role_settings is None else radio_roles.validate(role_settings)
+    if radio_roles.read() != role_settings:
+        raise RuntimeError('WAN radio assignment changed before startup')
     hostname = client_name(hostname)
     if os.geteuid() != 0: raise RuntimeError('Root required')
     lock = open('/run/roadlink-wan.lock', 'a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    LOCK_FD = lock.fileno()
     if Path('/run/netns/' + NS).exists() or Path('/sys/class/net/' + RADIO).exists():
         raise RuntimeError('WAN namespace/interface occupied')
     store = Profiles()
@@ -214,14 +225,17 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
     associate = routable or bootstrap
     candidates = Candidates(store.data, enabled=auto_open and associate)
     if not associate: profiles = []  # scan-only: no station association/DHCP
-    dev = resolve_role(inspect_interfaces(), 'wifi_wan')
+    dev = radio_roles.resolve(inspect_interfaces(), 'wifi_wan', role_settings)
     name = dev['interface']
     cap = capabilities(name)
-    if not cap.get('managed'): raise RuntimeError('USB radio lacks managed mode')
+    if not cap.get('known') or not cap.get('managed') or not cap.get('netns'):
+        raise RuntimeError('Selected WAN radio lacks managed mode or namespace support')
     if 'Connected to' in command(['iw', 'dev', name, 'link']).stdout:
         raise RuntimeError('Native USB radio connected; refusing takeover')
     link = json.loads(command(['ip', '-j', 'link', 'show', 'dev', name]).stdout)[0]
     if ROOT.exists():
+        if ROOT.is_symlink() or ROOT.stat().st_uid != 0 or ROOT.stat().st_mode & 0o077:
+            raise RuntimeError('Unsafe WAN runtime directory')
         if not load_json(ROOT / 'result.json', {}).get('cleaned'):
             raise RuntimeError('Previous WAN cleanup incomplete')
         for item in ROOT.iterdir():
@@ -292,7 +306,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
         reserve_gate = Gate(time.monotonic())
         while not (ROOT / 'stop').exists():
             if not alive({'pid': parent_pid, 'start': parent_start}): break
-            if transport_settings()['vpn_required'] != use_vpn: break
+            if transport_settings()['vpn_required'] != use_vpn or radio_roles.read() != role_settings: break
             if not alive(load_json(ROOT / 'guard.json', {})): raise RuntimeError('WAN guard exited')
             if not namespace_owned(state): raise RuntimeError('WAN namespace lost')
             pulse()
@@ -436,9 +450,10 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
 
 if __name__ == '__main__':
     action = sys.argv[1]
-    if action == 'child': child(sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5:])
+    if action == 'child': child(sys.argv[2], int(sys.argv[3]), sys.argv[4], int(sys.argv[5]), sys.argv[6:])
     elif action == 'guard': guard(int(sys.argv[2]), sys.argv[3], int(sys.argv[4]))
     elif action == 'stop': stop()
     elif action == 'serve': serve(int(sys.argv[2]), sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else '',
-                                len(sys.argv) > 5 and sys.argv[5] == '1', len(sys.argv) > 6 and sys.argv[6] == '1')
+                                len(sys.argv) > 5 and sys.argv[5] == '1', len(sys.argv) > 6 and sys.argv[6] == '1',
+                                {'vehicle_ap': sys.argv[7], 'usb_identity': sys.argv[8]} if len(sys.argv) > 8 else None)
     else: raise ValueError('Unknown WAN command')

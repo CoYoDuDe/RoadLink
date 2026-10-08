@@ -2,6 +2,7 @@
 import json
 import time
 from hardware import inspect_interfaces, command
+import radio_roles
 
 
 def snapshot():
@@ -20,7 +21,13 @@ def snapshot():
     }
 
 
-def role_text(state, role):
+def role_text(state, role, settings=None):
+    if settings is not None and role in ('vehicle_ap', 'wifi_wan'):
+        try:
+            dev = radio_roles.resolve(state['interfaces'], role, settings)
+        except ValueError:
+            return 'Ausgewaehltes Funkmodul nicht verfuegbar'
+        return '{} ({}, {})'.format(dev['interface'], dev['driver'], dev['operstate'])
     matches = [d for d in state['interfaces'] if d['suggested_role'] == role + '_candidate']
     if not matches:
         return 'Nicht erkannt'

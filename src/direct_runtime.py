@@ -23,11 +23,13 @@ from policy import Selector, Link
 from wan_config import wan_mode
 from direct_policy import Policy
 import direct_router as routing
+from runtime_lock import busy as runtime_locked
 
 ROOT = Path('/run/roadlink-direct')
 VPN_ROOT = Path('/run/roadlink-vpn')
 AP_ROOT = Path('/run/roadlink-ap')
 WAN_ROOT = Path('/run/roadlink-wan')
+LOCK_FD = None
 
 
 def pulse():
@@ -40,14 +42,14 @@ def tracked(args, check=True):
         raise RuntimeError('Direct controller stopping')
     pulse()
     result = subprocess.run([sys.executable, __file__, 'child', str(ROOT), str(os.getpid()),
-                           token(os.getpid()), *args], capture_output=True, text=True,
-                          timeout=8)
+                           token(os.getpid()), str(LOCK_FD), *args], capture_output=True, text=True,
+                          timeout=8, pass_fds=(LOCK_FD,))
     if check and result.returncode:
         raise RuntimeError('Direct command failed: ' + result.stderr[-1024:])
     return result
 
 
-def child(root, parent, start, args):
+def child(root, parent, start, lock_fd, args):
     root = Path(root)
     if root.is_symlink() or root.stat().st_uid != 0 or root.stat().st_mode & 0o077:
         raise RuntimeError('Unsafe direct runtime directory')
@@ -56,6 +58,7 @@ def child(root, parent, start, args):
             or not alive({'pid': parent, 'start': start})
             or not alive(load_json(root / 'guard.json', {}))):
         raise RuntimeError('Direct child no longer authorized')
+    os.set_inheritable(lock_fd, False)
     os.execvp(args[0], args)
 
 
@@ -119,6 +122,7 @@ def owners(root):
 
 
 def serve(parent_pid, parent_start):
+    global LOCK_FD
     if os.geteuid() != 0 or transport_settings()['vpn_required']:
         raise RuntimeError('Explicit direct transport choice is required')
     if (Path('/sys/class/net/wgroadlink').exists()
@@ -129,6 +133,7 @@ def serve(parent_pid, parent_start):
         raise RuntimeError('Unsafe direct runtime directory')
     lock = open(str(ROOT) + '.lock', 'a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    LOCK_FD = lock.fileno()
     if not load_json(ROOT / 'result.json', {'cleaned': True}).get('cleaned'):
         raise RuntimeError('Previous direct cleanup is incomplete')
     for file in ROOT.iterdir():
@@ -220,12 +225,13 @@ def serve(parent_pid, parent_start):
 
 
 def stop():
-    if not ROOT.exists():
+    if not ROOT.exists() and not runtime_locked(ROOT):
         return
-    (ROOT / 'stop').touch()
+    if ROOT.exists(): (ROOT / 'stop').touch()
     deadline = time.monotonic() + 25
     while time.monotonic() < deadline:
-        if load_json(ROOT / 'result.json', {}).get('cleaned') and not alive(load_json(ROOT / 'guard.json', {})):
+        if ((load_json(ROOT / 'result.json', {}).get('cleaned') or not ROOT.exists())
+                and not alive(load_json(ROOT / 'guard.json', {})) and not runtime_locked(ROOT)):
             return
         time.sleep(.2)
     raise RuntimeError('Direct cleanup incomplete')
@@ -233,7 +239,7 @@ def stop():
 
 if __name__ == '__main__':
     if sys.argv[1] == 'child':
-        child(sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5:])
+        child(sys.argv[2], int(sys.argv[3]), sys.argv[4], int(sys.argv[5]), sys.argv[6:])
     elif sys.argv[1] == 'stop':
         stop()
     elif sys.argv[1] == 'serve':

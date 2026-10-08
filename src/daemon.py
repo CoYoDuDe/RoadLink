@@ -43,6 +43,9 @@ from transport_runtime import clear as transport_clear
 from transport_api import install as install_transport_api
 from direct_status import ROOT as DIRECT_ROOT, current as direct_current
 from ap_runtime import command
+import radio_roles
+from radio_api import install as install_radio_api
+from runtime_lock import busy as runtime_locked
 import ipaddress
 
 
@@ -61,7 +64,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.20',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.21',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -109,6 +112,7 @@ def main():
     install_provider_api(service)
     install_dns_api(service)
     install_transport_api(service)
+    install_radio_api(service)
     service.register()
     worker = None
     signature = None
@@ -140,6 +144,8 @@ def main():
         root = roots[name]
         if process and process.poll() is None:
             return True
+        if runtime_locked(root):
+            return True
         if not root.exists():
             return False
         if any(alive(load_json(root / (item + '.json'), {})) for item in ('controller', 'guard')):
@@ -157,11 +163,15 @@ def main():
             import time
             safe_mode = Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()
             try:
+                role_config = radio_roles.read()
+                radio_key = radio_roles.generation(role_config)
                 use_vpn = transport_settings()['vpn_required']
                 wanted = 'off' if safe_mode else 'vpn' if use_vpn else 'direct'
             except (ValueError, OSError):
                 use_vpn, wanted = True, 'off'
-            switching = barrier.phase is not None or barrier.current != wanted
+                role_config, radio_key = dict(radio_roles.DEFAULT), None
+            switching = (barrier.phase is not None or barrier.current != wanted
+                         or barrier.current_key != radio_key)
             if switching:
                 if ENROLLMENT_ROOT.exists() and not ENROLLMENT_ROOT.is_symlink():
                     write_json(ENROLLMENT_ROOT / 'request.json', {'pid': os.getpid(),
@@ -170,7 +180,7 @@ def main():
                     enrollment_worker.terminate()
                     service['/Transport/Status'] = 'Wartet auf VPN-Einrichtung'
                     return True
-            if not barrier.step(wanted):
+            if not barrier.step(wanted, radio_key):
                 service['/Transport/Status'] = 'Bereinigt bisherigen Modus'
                 service['/Security'] = 'Moduswechsel; bisheriger Modus stoppt'
                 service['/AP/Status'] = 'Moduswechsel'
@@ -205,6 +215,7 @@ def main():
             if wan_worker and wan_current != wan_signature:
                 (WAN_ROOT / 'stop').touch()
             elif (not wan_worker and wan_requested and time.monotonic() >= wan_retry_at
+                  and not runtime_locked(WAN_ROOT)
                   and not alive(load_json(WAN_ROOT / 'guard.json', {}))):
                 if load_json(WAN_ROOT / 'result.json', {'cleaned': True}).get('cleaned'):
                     wan_signature = wan_current
@@ -212,13 +223,15 @@ def main():
                         str(Path(__file__).with_name('wan_runtime.py')), 'serve',
                         str(os.getpid()), token(os.getpid()), hostname, str(int(settings['auto_open'])),
                         str(int(use_vpn and bool(settings['auto_enroll']) and enrollment_allowed()
-                                and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()))])
+                                and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists())),
+                        role_config['vehicle_ap'], role_config['usb_identity']])
             if vpn_worker and vpn_worker.poll() is not None:
                 vpn_worker = None
                 vpn_retry_at = time.monotonic() + 15
             if vpn_worker and vpn_current != vpn_signature:
                 (VPN_ROOT / 'stop').touch()
             elif (not vpn_worker and vpn_requested and time.monotonic() >= vpn_retry_at
+                  and not runtime_locked(VPN_ROOT)
                   and not alive(load_json(VPN_ROOT / 'guard.json', {}))):
                 result = load_json(VPN_ROOT / 'result.json', {'cleaned': True})
                 if result.get('cleaned'):
@@ -235,6 +248,7 @@ def main():
             if direct_worker and direct_current_signature != direct_signature:
                 (DIRECT_ROOT / 'stop').touch()
             elif (not direct_worker and direct_requested and time.monotonic() >= direct_retry_at
+                  and not runtime_locked(DIRECT_ROOT)
                   and not alive(load_json(DIRECT_ROOT / 'guard.json', {}))
                   and load_json(DIRECT_ROOT / 'result.json', {'cleaned': True}).get('cleaned')):
                 direct_signature = direct_current_signature
@@ -297,14 +311,19 @@ def main():
                 if enrollment_state.get('pid') == os.getpid() and enrollment_state.get('start') == token(os.getpid())
                 else 'DNSmith.net wird eingerichtet')
             service['/Ethernet'] = role_text(state, 'ethernet')
-            service['/WifiWan'] = role_text(state, 'wifi_wan')
-            service['/VehicleAp'] = role_text(state, 'vehicle_ap')
+            service['/WifiWan'] = role_text(state, 'wifi_wan', role_config)
+            service['/VehicleAp'] = role_text(state, 'vehicle_ap', role_config)
+            service['/Radio/VehicleAP'] = role_config['vehicle_ap']
+            service['/Radio/WanRadio'] = 'USB-Stick' if role_config['vehicle_ap'] == 'internal' else 'Integriertes WLAN'
             service['/DefaultInterface'] = state['default_interface'] or 'Keine'
             service['/LastUpdate'] = state['timestamp']
             service['/Wan/Active'] = ('Ethernet / Starlink' if any(d['interface'] == state['default_interface']
                 and d['suggested_role'] == 'ethernet_candidate' for d in state['interfaces'])
                 else state['default_interface'] or 'Keine Standardroute')
-            radios = [d for d in state['interfaces'] if d['suggested_role'] == 'wifi_wan_candidate']
+            try:
+                radios = [radio_roles.resolve(state['interfaces'], 'wifi_wan', role_config)]
+            except ValueError:
+                radios = []
             if len(radios) == 1:
                 wifi_available = True
                 try:
@@ -320,7 +339,7 @@ def main():
                 service['/WifiWan/State'] = 'missing' if not radios else 'ambiguous'
             wan_state = load_json(WAN_ROOT / 'status.json', {})
             if wan_worker and alive(load_json(WAN_ROOT / 'guard.json', {})):
-                service['/WifiWan'] = 'Isolierter USB-Stick (' + wan_state.get('driver', 'startet') + ')'
+                service['/WifiWan'] = service['/Radio/WanRadio'] + ' (' + wan_state.get('driver', 'startet') + ')'
                 service['/WifiWan/SSID'] = wan_state.get('ssid') or ('Suchmodus, nicht verbunden'
                     if wan_state.get('state') == 'SCAN_ONLY' else 'Verbindet WLAN')
                 service['/WifiWan/State'] = wan_state.get('state', 'STARTING')
@@ -341,8 +360,8 @@ def main():
             service['/Wan/Health'] = 'Internet nicht bereit'
             if 'wan' in path_state:
                 active = path_state['wan']
-                service['/Wan/Active'] = {'ethernet': 'Ethernet / Starlink', 'wifi': 'USB-WLAN'}.get(active, 'Kein geeigneter WAN-Pfad')
-                service['/Wan/Reason'] = ('Direkt ueber USB-WLAN' if not use_vpn and active == 'wifi' else
+                service['/Wan/Active'] = {'ethernet': 'Ethernet / Starlink', 'wifi': service['/Radio/WanRadio']}.get(active, 'Kein geeigneter WAN-Pfad')
+                service['/Wan/Reason'] = ('Direkt ueber WLAN' if not use_vpn and active == 'wifi' else
                     'Direkt ueber Ethernet / Starlink' if not use_vpn and active == 'ethernet' else
                     'Ethernet-Tunnel nicht erreichbar, WLAN aktiv'
                     if active == 'wifi' and vpn_state.get('penalties', {}).get('ethernet') else
@@ -366,12 +385,13 @@ def main():
                 ap_retry_at = time.monotonic() + 15
             if worker and (not requested[0] or signature != requested):
                 (AP_ROOT / 'stop').touch()
-            elif not worker and not alive(load_json(AP_ROOT / 'guard.json', {})):
+            elif not worker and not transport_busy('ap'):
                 signature = requested
                 if requested[0] and time.monotonic() >= ap_retry_at:
                     failed = None
                     worker = subprocess.Popen([sys.executable, str(Path(__file__).with_name('ap_runtime.py')),
-                                               'serve', requested[1], str(os.getpid()), token(os.getpid())])
+                                               'serve', requested[1], str(os.getpid()), token(os.getpid()),
+                                               role_config['vehicle_ap'], role_config['usb_identity']])
             ap_state = load_json(AP_ROOT / 'status.json', {})
             internet = bool(worker and ap_state.get('internet')
                             and vpn_worker and vpn_state.get('state') == 'READY')

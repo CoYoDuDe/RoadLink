@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.20 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.21 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -23,6 +23,8 @@ Die Startseite zeigt den Internetpfad, das verbundene WLAN und den Status. Unter
 4. Ein externes WLAN auswählen und speichern. Automatische Verbindung im gewünschten Profil freigeben.
 
 Das Fahrzeug-WLAN heißt bei Neuinstallation **RoadLink**. Es gibt kein gemeinsames WLAN-Passwort und keine vorgegebenen externen WLANs oder gemeinsamen VPN-Schlüssel. WLAN und USB-Reserve starten ausgeschaltet; der Verbindungsmodus ist `AUTO`. DNSmith-Einrichtung startet eingeschaltet. Bestehende Einstellungen bleiben bei Updates erhalten.
+
+Unter **Fahrzeug-WLAN → Fahrzeug-WLAN über** das integrierte WLAN oder den USB-Stick wählen. Das andere Funkmodul empfängt externe WLANs. Standard ist das integrierte Fahrzeug-WLAN. Beide WLAN-Dienste starten beim Wechsel neu; Ethernet bleibt erhalten. Der USB-Stick muss AP-Betrieb unterstützen, das Empfangsmodul den getrennten Netzwerkbereich. Ein fehlendes oder nicht eindeutig zugeordnetes Modul wird nicht durch ein beliebiges anderes Gerät ersetzt.
 
 ## Was bereits funktioniert
 
@@ -65,7 +67,7 @@ Beim Wechsel beendet RoadLink zunächst den bisherigen Modus und prüft dessen B
 | PREFER_WIFI | Geeignetes WLAN bevorzugen |
 | BEST_CONNECTION | Aktuell die Antwortzeit vergleichen |
 | STARLINK_ONLY | Nur Ethernet/Starlink verwenden |
-| WIFI_ONLY | Nur USB-WLAN verwenden |
+| WIFI_ONLY | Nur das gewählte Empfangs-WLAN verwenden |
 
 ## Noch offen
 

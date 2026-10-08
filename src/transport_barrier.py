@@ -9,12 +9,13 @@ class Barrier:
     def __init__(self, stop, busy, clear):
         self.stop, self.busy, self.clear = stop, busy, clear
         self.current = None
+        self.current_key = None
         self.phase = None
 
-    def step(self, wanted):
+    def step(self, wanted, key=None):
         if wanted not in ('vpn', 'direct', 'off'):
             raise ValueError('Invalid transport mode')
-        if self.phase is None and self.current == wanted:
+        if self.phase is None and self.current == wanted and self.current_key == key:
             return True
         if self.phase is None:
             self.phase = 0
@@ -30,5 +31,5 @@ class Barrier:
             return False
         # wanted is read anew during every step; an intervening edit never
         # launches a superseded mode after the old services finish draining.
-        self.current, self.phase = wanted, None
+        self.current, self.current_key, self.phase = wanted, key, None
         return True

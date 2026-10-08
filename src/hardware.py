@@ -63,18 +63,37 @@ def inspect_interfaces(sys_class_net='/sys/class/net'):
     return devices
 
 
+def parse_capabilities(detail, phy):
+    frequencies = sorted(set(float(value) for value in re.findall(r'\*\s+([0-9.]+) MHz', detail)))
+    combinations = detail.split('valid interface combinations:', 1)[-1].split('Device supports', 1)[0]
+    combinations = re.split(r'\n\s*\* ', combinations) if 'valid interface combinations:' in detail else []
+    concurrent = [part for part in combinations if re.search(r'\bmanaged\b', part)
+                  and re.search(r'\bAP\b', part) and re.search(r'total <= ([2-9]|[1-9][0-9]+)\b', part)]
+    rx_section = detail.split('VHT RX MCS set:', 1)[-1].split('VHT TX', 1)[0]
+    streams = [int(count) for count in re.findall(r'([1-8]) streams: MCS ', rx_section)] if 'VHT RX MCS set:' in detail else []
+    return {'known': bool(detail), 'phy': phy,
+            'ap': bool(re.search(r'^\s*\* AP\s*$', detail, re.M)),
+            'managed': bool(re.search(r'^\s*\* managed\s*$', detail, re.M)),
+            'netns': bool(re.search(r'^\s*\* set_wiphy_netns\s*$', detail, re.M)),
+            'bands': [name for name, lower, upper in (('2.4 GHz', 2400, 2500), ('5 GHz', 4900, 5925), ('6 GHz', 5925, 7125))
+                      if any(lower <= value < upper for value in frequencies)],
+            'frequencies': frequencies,
+            'concurrent_ap_managed': bool(concurrent),
+            'concurrent_channels': max([int(number) for part in concurrent
+                                       for number in re.findall(r'#channels <= (\d+)', part)] or [0]),
+            'vht_rx_streams': max(streams) if streams else None}
+
+
 def capabilities(interface):
     if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,15}', interface):
         raise ValueError('Invalid interface name')
     info = command(['iw', 'dev', interface, 'info'])
     match = re.search(r'^\s*wiphy (\d+)\s*$', info, re.M)
     if not match:
-        return {'known': False, 'ap': False, 'managed': False}
+        return parse_capabilities('', '')
     phy = 'phy' + match.group(1)
     detail = command(['iw', 'phy', phy, 'info'])
-    return {'known': bool(detail), 'phy': phy,
-            'ap': bool(re.search(r'^\s*\* AP\s*$', detail, re.M)),
-            'managed': bool(re.search(r'^\s*\* managed\s*$', detail, re.M))}
+    return parse_capabilities(detail, phy)
 
 
 def resolve_role(devices, role, configured_identity=None):

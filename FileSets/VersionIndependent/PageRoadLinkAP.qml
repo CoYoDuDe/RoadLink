@@ -18,6 +18,17 @@ MbPage {
             overwriteMode: false
             writeAccessLevel: User.AccessInstaller
         }
+        MbItemOptions {
+            description: qsTr("Fahrzeug-WLAN ueber")
+            bind: "com.coyodude.roadlink/Radio/VehicleAP"
+            writeAccessLevel: User.AccessInstaller
+            possibleValues: [
+                MbOption { description: qsTr("Integriertes WLAN"); value: "internal" },
+                MbOption { description: qsTr("USB-Stick"); value: "usb" }
+            ]
+        }
+        MbItemValue { description: qsTr("Externe WLANs ueber"); item.bind: "com.coyodude.roadlink/Radio/WanRadio" }
+        MbItemValue { description: qsTr("Funkzuordnung"); item.bind: "com.coyodude.roadlink/Radio/EditStatus" }
         MbItemValue { description: qsTr("Status"); item.bind: "com.coyodude.roadlink/AP/Status" }
         MbEditBox {
             id: passwordEditor

@@ -10,7 +10,9 @@ import subprocess
 import sys
 import time
 from ap_config import hostapd, isolated_dhcp, choose_subnet
-from hardware import inspect_interfaces, resolve_role
+from hardware import inspect_interfaces, capabilities
+import radio_roles
+import ap_radio
 from storage import atomic_write, load_json, write_json
 from vpn_config import read as vpn_config
 from dns_config import routed as routed_dns, ready as dns_ready
@@ -18,15 +20,30 @@ from dns_config import read as dns_settings
 from transport_config import read as transport_settings
 from direct_status import current as direct_current
 import ap_router
+from runtime_lock import busy as runtime_locked
 
 ROOT = Path('/run/roadlink-ap')
 SECRET = Path('/data/setupOptions/RoadLink/ap-secret.json')
 INTERFACE = 'aproadlink'
 TAG = 'roadlink-ap-owned'
+LOCK_FD = None
 
 
 def command(args, check=True):
     return subprocess.run(args, capture_output=True, text=True, timeout=8, check=check)
+
+
+def tracked(args, check=True):
+    if ((ROOT / 'stop').exists() or (ROOT / 'cleaning').exists()
+            or not alive(load_json(ROOT / 'guard.json', {}))):
+        raise RuntimeError('AP controller stopping')
+    atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
+    result = subprocess.run([sys.executable, __file__, 'child', 'mutation', str(os.getpid()),
+                             token(os.getpid()), str(LOCK_FD), *args], capture_output=True,
+                            text=True, timeout=8, pass_fds=(LOCK_FD,))
+    if check and result.returncode:
+        raise RuntimeError('AP command failed: ' + result.stderr[-1024:])
+    return result
 
 
 def token(pid):
@@ -58,7 +75,7 @@ def rules():
 def cleanup():
     (ROOT / 'cleaning').touch()
     errors = []
-    for name in ('hostapd', 'dnsmasq'):
+    for name in ('mutation', 'hostapd', 'dnsmasq'):
         state = load_json(ROOT / (name + '.json'), {})
         if alive(state):
             try:
@@ -66,7 +83,7 @@ def cleanup():
             except ProcessLookupError:
                 pass
     deadline = time.monotonic() + 3
-    children = [load_json(ROOT / (name + '.json'), {}) for name in ('hostapd', 'dnsmasq')]
+    children = [load_json(ROOT / (name + '.json'), {}) for name in ('mutation', 'hostapd', 'dnsmasq')]
     while any(alive(state) for state in children) and time.monotonic() < deadline:
         time.sleep(0.1)
     for state in children:
@@ -85,10 +102,13 @@ def cleanup():
         if control_socket.is_socket():
             control_socket.unlink()
     # Remove interface before permitting traffic by removing the owned rules.
-    command(['iw', 'dev', INTERFACE, 'del'], check=False)
-    if Path('/sys/class/net/' + INTERFACE).exists():
-        errors.append('AP interface removal failed; firewall retained')
-    else:
+    if not errors:
+        try:
+            ap_radio.remove_virtual(ROOT, command)
+            ap_radio.restore_parent(ROOT, command)
+        except Exception as exc:
+            errors.append(str(exc))
+    if not errors:
         errors.extend(ap_router.cleanup(ROOT, command))
         for rule in reversed(list(rules())):
             command([rule[0], '-w', '3', '-D', *rule[1:]], check=False)
@@ -128,45 +148,58 @@ def launch(name, args):
     # The child records its own identity before exec. Killing the controller
     # between Popen and PID recording must not leave an untracked process.
     return subprocess.Popen([sys.executable, __file__, 'child', name, str(os.getpid()),
-                             token(os.getpid()), *args], stdin=subprocess.DEVNULL)
+                             token(os.getpid()), str(LOCK_FD), *args], stdin=subprocess.DEVNULL,
+                             pass_fds=(LOCK_FD,))
 
 
-def child(name, parent_pid, parent_start, args):
-    if name not in ('hostapd', 'dnsmasq'):
+def child(name, parent_pid, parent_start, lock_fd, args):
+    if name not in ('hostapd', 'dnsmasq', 'mutation'):
         raise ValueError('Unknown AP child')
     write_json(ROOT / (name + '.json'), {'pid': os.getpid(), 'start': token(os.getpid())})
     if ((ROOT / 'cleaning').exists() or (ROOT / 'stop').exists()
-            or not alive({'pid': parent_pid, 'start': parent_start})):
+            or not alive({'pid': parent_pid, 'start': parent_start})
+            or not alive(load_json(ROOT / 'guard.json', {}))):
         return
+    os.set_inheritable(lock_fd, False)
     os.execvp(args[0], args)
 
 
 def stop():
-    if not ROOT.exists():
+    if not ROOT.exists() and not runtime_locked(ROOT):
         return
     state = load_json(ROOT / 'controller.json', {})
-    (ROOT / 'stop').touch()
+    if ROOT.exists():
+        (ROOT / 'stop').touch()
     if alive(state):
         os.kill(state['pid'], signal.SIGTERM)
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         result = load_json(ROOT / 'result.json', {})
-        if result.get('cleaned') and not alive(load_json(ROOT / 'guard.json', {})):
+        if ((result.get('cleaned') or not ROOT.exists())
+                and not alive(load_json(ROOT / 'guard.json', {})) and not runtime_locked(ROOT)):
             return
         time.sleep(0.2)
     raise RuntimeError('AP cleanup is incomplete; refusing installation/uninstall')
 
 
-def serve(ssid, parent_pid, parent_start):
+def _serve(ssid, parent_pid, parent_start, role_settings=None):
+    global LOCK_FD
+    command = globals()['command']
+    role_settings = dict(radio_roles.DEFAULT) if role_settings is None else radio_roles.validate(role_settings)
+    if radio_roles.read() != role_settings:
+        raise RuntimeError('AP radio assignment changed before startup')
     if os.geteuid() != 0:
         raise RuntimeError('Root required')
     lock = open('/run/roadlink-ap.lock', 'a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    LOCK_FD = lock.fileno()
     if Path('/sys/class/net/' + INTERFACE).exists():
         raise RuntimeError('AP interface already exists; refusing to take ownership')
     if ROOT.exists():
-        if not load_json(ROOT / 'result.json', {}).get('cleaned'):
-            raise RuntimeError('Previous AP cleanup is incomplete')
+        if ROOT.is_symlink() or ROOT.stat().st_uid != 0 or ROOT.stat().st_mode & 0o077:
+            raise RuntimeError('Unsafe AP runtime directory')
+        if load_json(ROOT / 'result.json', {}).get('cleaned') is not True:
+            raise RuntimeError('Previous AP cleanup incomplete')
         for item in ROOT.iterdir():
             if item.is_file() and not item.is_symlink():
                 item.unlink()
@@ -179,7 +212,8 @@ def serve(ssid, parent_pid, parent_start):
     write_json(ROOT / 'result.json', {'cleaned': True, 'errors': []})
     secret = load_json(SECRET, {})
     config = hostapd(INTERFACE, ssid, secret.get('password', ''))
-    dev = resolve_role(inspect_interfaces(), 'vehicle_ap')
+    dev = radio_roles.resolve(inspect_interfaces(), 'vehicle_ap', role_settings)
+    radio_state = ap_radio.plan(ROOT, dev, capabilities(dev['interface']), command)
     if 'Connected to' in command(['iw', 'dev', dev['interface'], 'link']).stdout:
         raise RuntimeError('Internal radio is in use')
     routes = json.loads(command(['ip', '-j', '-4', 'route', 'show', 'table', 'all']).stdout)
@@ -205,12 +239,13 @@ def serve(ssid, parent_pid, parent_start):
         time.sleep(0.1)
     else:
         raise RuntimeError('Guard unavailable; network unchanged')
+    command = tracked
     signal.signal(signal.SIGTERM, lambda *_: (ROOT / 'stop').touch())
     signal.signal(signal.SIGINT, lambda *_: (ROOT / 'stop').touch())
     for rule in rules():
         command([rule[0], '-w', '3', '-I', rule[1], '1', *rule[2:]])
-    command(['iw', 'dev', dev['interface'], 'interface', 'add', INTERFACE, 'type', '__ap'])
-    Path('/proc/sys/net/ipv6/conf/' + INTERFACE + '/disable_ipv6').write_text('1\n')
+    ap_radio.acquire(ROOT, radio_state, command)
+    command(['sysctl', '-qw', 'net.ipv6.conf.' + INTERFACE + '.disable_ipv6=1'])
     command(['ip', 'addr', 'add', address + '/24', 'dev', INTERFACE])
     command(['ip', 'link', 'set', INTERFACE, 'up'])
     if routing:
@@ -230,12 +265,14 @@ def serve(ssid, parent_pid, parent_start):
     ready = False
     startup_deadline = time.monotonic() + 20
     while not (ROOT / 'result.json').exists():
+        if not alive(load_json(ROOT / 'guard.json', {})):
+            raise RuntimeError('AP guard exited; controller must clean up')
         if not alive({'pid': parent_pid, 'start': parent_start}):
             (ROOT / 'stop').touch()
         if not (ROOT / 'cleaning').exists() and (ap.poll() is not None or dhcp_process.poll() is not None):
             (ROOT / 'stop').touch()
         if not (ROOT / 'stop').exists():
-            if transport_settings()['vpn_required'] != use_vpn:
+            if transport_settings()['vpn_required'] != use_vpn or radio_roles.read() != role_settings:
                 (ROOT / 'stop').touch()
                 continue
             atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
@@ -277,14 +314,28 @@ def serve(ssid, parent_pid, parent_start):
     dhcp_process.wait(timeout=5)
 
 
+def serve(ssid, parent_pid, parent_start, role_settings=None):
+    try:
+        return _serve(ssid, parent_pid, parent_start, role_settings)
+    finally:
+        controller = load_json(ROOT / 'controller.json', {})
+        if controller.get('pid') == os.getpid() and alive(controller):
+            (ROOT / 'stop').touch()
+            # If the guard dies first, the controller still owns its journal.
+            # No new worker may start until cleanup and inherited locks finish.
+            if not alive(load_json(ROOT / 'guard.json', {})) and not (ROOT / 'result.json').exists():
+                cleanup()
+
+
 if __name__ == '__main__':
     if sys.argv[1] == 'child':
-        child(sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5:])
+        child(sys.argv[2], int(sys.argv[3]), sys.argv[4], int(sys.argv[5]), sys.argv[6:])
     elif sys.argv[1] == 'guard':
         guard(int(sys.argv[2]), sys.argv[3], int(sys.argv[4]))
     elif sys.argv[1] == 'stop':
         stop()
     elif sys.argv[1] == 'serve':
-        serve(sys.argv[2], int(sys.argv[3]), sys.argv[4])
+        serve(sys.argv[2], int(sys.argv[3]), sys.argv[4],
+              {'vehicle_ap': sys.argv[5], 'usb_identity': sys.argv[6]} if len(sys.argv) > 6 else None)
     else:
         raise ValueError('Unknown AP command')
