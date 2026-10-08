@@ -8,6 +8,9 @@ from urllib.parse import urlsplit
 import portal_forms
 import portal_known
 CONSENT_NAMES={'terms','accept_terms','agree','agreement','accept','tos','conditions','termsAccepted'}
+STATIC_PATHS={'/','/login','/login/','/login.html','/login.htm','/index.html',
+              '/portal','/portal/','/portal.html','/guest','/guest/login',
+              '/activate','/connect','/accept','/done','/success'}
 
 
 def observe(page, radio):
@@ -35,9 +38,10 @@ def observe(page, radio):
         snapshot=portal_known.descriptor(observed)
         if snapshot['manual_reasons']:return None
         for value in (snapshot['url'],snapshot['form_action'],*snapshot['redirects']):
-            # Generic static adapter cannot identify session tokens in paths.
-            # Keep only simple static paths; dynamic paths need a vendor adapter.
-            if any(not re.fullmatch(r'[a-z._-]{1,32}',part) for part in urlsplit(value).path.split('/') if part):
+            # Even alphabetic paths may contain a session token. This generic
+            # adapter retains only recognized static endpoints; other paths
+            # require a vendor adapter with explicit token normalization.
+            if urlsplit(value).path not in STATIC_PATHS:
                 return None
         return {'descriptor':snapshot,'fingerprint':portal_known.digest(snapshot),'review':review}
     except (ValueError,KeyError,TypeError):return None
@@ -56,6 +60,8 @@ def validate(value):
             or review['roles']!={f['name']:f['role'] for f in snapshot['fields']}):
         raise ValueError('Inconsistent portal candidate')
     fields=snapshot['fields']
+    if any(urlsplit(v).path not in STATIC_PATHS for v in (snapshot['url'],snapshot['form_action'],*snapshot['redirects'])):
+        raise ValueError('Unrecognized static path')
     if (sum(f['type']=='submit' and f['role']=='submit' for f in fields)!=1
             or sum(f['type']=='checkbox' for f in fields)>1
             or any(not (f['type']=='submit' and f['role']=='submit'
