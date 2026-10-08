@@ -37,6 +37,13 @@ from vpn_provider_api import install as install_provider_api
 from dns_config import read as dns_settings, routed as routed_dns, ready as dns_ready
 from dns_api import install as install_dns_api
 from enrollment_scheduler import EnrollmentSchedule
+from transport_config import read as transport_settings, direct_dns
+from transport_barrier import Barrier
+from transport_runtime import clear as transport_clear
+from transport_api import install as install_transport_api
+from direct_status import ROOT as DIRECT_ROOT, current as direct_current
+from ap_runtime import command
+import ipaddress
 
 
 def main():
@@ -54,7 +61,7 @@ def main():
     }, eventCallback=lambda *_: None)
     service = VeDbusService('com.coyodude.roadlink', bus=bus, register=False)
     for path, value in {
-        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.19',
+        '/Mgmt/ProcessName': __file__, '/Mgmt/ProcessVersion': '0.20',
         '/Mgmt/Connection': 'Local network controller', '/Connected': 1,
         '/Status': 'Nur Diagnose',
         '/Ethernet': '', '/WifiWan': '', '/VehicleAp': '', '/DefaultInterface': '',
@@ -101,6 +108,7 @@ def main():
     install_scan_api(service)
     install_provider_api(service)
     install_dns_api(service)
+    install_transport_api(service)
     service.register()
     worker = None
     signature = None
@@ -114,28 +122,83 @@ def main():
     wan_retry_at = 0
     enrollment_worker = None
     enrollment_schedule = EnrollmentSchedule()
+    direct_worker = None
+    direct_signature = None
+    direct_retry_at = 0
+    roots = {'ap': AP_ROOT, 'vpn': VPN_ROOT, 'wan': WAN_ROOT, 'direct': DIRECT_ROOT}
+
+    def stop_transport(name):
+        root = roots[name]
+        if root.is_symlink():
+            raise ValueError('Unsafe transport runtime directory')
+        if root.exists():
+            (root / 'stop').touch()
+
+    def transport_busy(name):
+        processes = {'ap': worker, 'vpn': vpn_worker, 'wan': wan_worker, 'direct': direct_worker}
+        process = processes[name]
+        root = roots[name]
+        if process and process.poll() is None:
+            return True
+        if not root.exists():
+            return False
+        if any(alive(load_json(root / (item + '.json'), {})) for item in ('controller', 'guard')):
+            return True
+        return load_json(root / 'result.json', {}).get('cleaned') is not True
+
+    barrier = Barrier(stop_transport, transport_busy, lambda: transport_clear(command))
 
     def refresh():
         nonlocal worker, signature, failed, vpn_worker, vpn_signature, vpn_retry_at, ap_retry_at
         nonlocal wan_worker, wan_signature, wan_retry_at
         nonlocal enrollment_worker
+        nonlocal direct_worker, direct_signature, direct_retry_at
         try:
             import time
+            safe_mode = Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()
+            try:
+                use_vpn = transport_settings()['vpn_required']
+                wanted = 'off' if safe_mode else 'vpn' if use_vpn else 'direct'
+            except (ValueError, OSError):
+                use_vpn, wanted = True, 'off'
+            switching = barrier.phase is not None or barrier.current != wanted
+            if switching:
+                if ENROLLMENT_ROOT.exists() and not ENROLLMENT_ROOT.is_symlink():
+                    write_json(ENROLLMENT_ROOT / 'request.json', {'pid': os.getpid(),
+                        'start': token(os.getpid()), 'enabled': False})
+                if enrollment_worker and enrollment_worker.poll() is None:
+                    enrollment_worker.terminate()
+                    service['/Transport/Status'] = 'Wartet auf VPN-Einrichtung'
+                    return True
+            if not barrier.step(wanted):
+                service['/Transport/Status'] = 'Bereinigt bisherigen Modus'
+                service['/Security'] = 'Moduswechsel; bisheriger Modus stoppt'
+                service['/AP/Status'] = 'Moduswechsel'
+                service['/DNS/Active'] = 'Nicht bereit'
+                return True
+            if switching:
+                worker = vpn_worker = wan_worker = direct_worker = None
+                signature = vpn_signature = wan_signature = direct_signature = None
+                vpn_retry_at = wan_retry_at = ap_retry_at = direct_retry_at = 0
+                failed = None
+            service['/Transport/Status'] = {'vpn': 'VPN erforderlich',
+                'direct': 'Direkt, ohne VPN', 'off': 'Angehalten; Einstellungen pruefen'}[wanted]
             vpn_invalid = False
             try:
-                configuration = vpn_config()
+                configuration = vpn_config() if use_vpn else None
             except (ValueError, KeyError, OSError):
                 configuration, vpn_invalid = None, True
-            vpn_requested = bool(configuration and configuration['enabled']
+            vpn_requested = bool(wanted == 'vpn' and configuration and configuration['enabled']
                 and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists())
             vpn_current = repr(configuration) if vpn_requested else None
             profiles_path = Path('/data/setupOptions/RoadLink/wifi-profiles.json')
-            wan_requested = bool(settings['wan_enabled'])
+            wan_requested = bool(settings['wan_enabled'] and wanted != 'off')
             hostname = client_name(str(settings['client_name']))
             service['/WifiWan/ClientName'] = hostname
-            wan_current = (repr(configuration), profiles_path.stat().st_mtime_ns
+            wan_current = (repr(configuration) if use_vpn else repr(direct_dns(dns_settings())),
+                           use_vpn, profiles_path.stat().st_mtime_ns
                            if profiles_path.exists() else 0, hostname, bool(settings['auto_open']),
-                           bool(settings['auto_enroll']) and enrollment_allowed()) if wan_requested else None
+                           use_vpn and bool(settings['auto_enroll']) and enrollment_allowed()) if wan_requested else None
             if wan_worker and wan_worker.poll() is not None:
                 wan_worker = None
                 wan_retry_at = time.monotonic() + 15
@@ -148,7 +211,7 @@ def main():
                     wan_worker = subprocess.Popen([sys.executable,
                         str(Path(__file__).with_name('wan_runtime.py')), 'serve',
                         str(os.getpid()), token(os.getpid()), hostname, str(int(settings['auto_open'])),
-                        str(int(bool(settings['auto_enroll']) and enrollment_allowed()
+                        str(int(use_vpn and bool(settings['auto_enroll']) and enrollment_allowed()
                                 and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()))])
             if vpn_worker and vpn_worker.poll() is not None:
                 vpn_worker = None
@@ -164,6 +227,21 @@ def main():
                         str(Path(__file__).with_name('vpn_runtime.py')), 'serve',
                         str(os.getpid()), token(os.getpid())])
             vpn_state = load_json(VPN_ROOT / 'status.json', {})
+            direct_requested = wanted == 'direct'
+            direct_current_signature = repr(direct_dns(dns_settings())) if direct_requested else None
+            if direct_worker and direct_worker.poll() is not None:
+                direct_worker = None
+                direct_retry_at = time.monotonic() + 15
+            if direct_worker and direct_current_signature != direct_signature:
+                (DIRECT_ROOT / 'stop').touch()
+            elif (not direct_worker and direct_requested and time.monotonic() >= direct_retry_at
+                  and not alive(load_json(DIRECT_ROOT / 'guard.json', {}))
+                  and load_json(DIRECT_ROOT / 'result.json', {'cleaned': True}).get('cleaned')):
+                direct_signature = direct_current_signature
+                direct_worker = subprocess.Popen([sys.executable,
+                    str(Path(__file__).with_name('direct_runtime.py')), 'serve',
+                    str(os.getpid()), token(os.getpid())])
+            direct_state = load_json(DIRECT_ROOT / 'status.json', {})
             service['/DNS/Provider'] = 'DNSmith' if dns_settings()['dnsmith'] else 'Eigener DNS'
             service['/DNS/Active'] = vpn_state['dns'] if vpn_worker and dns_ready(configuration, vpn_state) else 'Nicht bereit'
             service['/VPN/Status'] = ('Konfiguration ungueltig' if vpn_invalid else
@@ -174,7 +252,7 @@ def main():
                                   if vpn_worker and vpn_state.get('dns_ready') else 'Nicht bereit')
             service['/Security'] = 'AP nur lokal'
             state = snapshot()
-            enrollment_requested = bool(settings['auto_enroll'] and enrollment_allowed()
+            enrollment_requested = bool(use_vpn and wanted != 'off' and settings['auto_enroll'] and enrollment_allowed()
                 and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists())
             if enrollment_requested or ENROLLMENT_ROOT.exists():
                 if ENROLLMENT_ROOT.is_symlink():
@@ -206,7 +284,8 @@ def main():
                     enrollment_command = ['ip', 'netns', 'exec', 'roadlink-wan', *enrollment_command]
                 enrollment_worker = subprocess.Popen(enrollment_command)
             enrollment_state = load_json(ENROLLMENT_ROOT / 'status.json', {})
-            service['/VPN/Enrollment'] = ('VPN-Einstellungen vorhanden' if vpn_configured() else
+            service['/VPN/Enrollment'] = ('Im direkten Betrieb ausgeschaltet' if not use_vpn else
+                'VPN-Einstellungen vorhanden' if vpn_configured() else
                 'Eigenen VPN einrichten' if vpn_provider() == 'custom' else
                 'Automatische Einrichtung ausgeschaltet' if not settings['auto_enroll'] else
                 'Im Sicherheitsmodus angehalten' if Path('/data/setupOptions/RoadLink/SAFE_MODE').exists() else
@@ -245,7 +324,7 @@ def main():
                 service['/WifiWan/SSID'] = wan_state.get('ssid') or ('Suchmodus, nicht verbunden'
                     if wan_state.get('state') == 'SCAN_ONLY' else 'Verbindet WLAN')
                 service['/WifiWan/State'] = wan_state.get('state', 'STARTING')
-                service['/Wan/Reason'] = ('WLAN als Reserve verbunden; VPN noch ueber Ethernet'
+                service['/Wan/Reason'] = ('WLAN als Reserve verbunden'
                     if wan_state.get('state') == 'LEASED' else 'WLANs werden gesucht oder geprueft')
             else:
                 service['/Wan/Reason'] = ('WLAN-Bereinigung fehlgeschlagen' if wan_state.get('state') == 'CLEANUP_FAILED'
@@ -253,24 +332,29 @@ def main():
             service['/WifiWan/StateText'] = {
                 'LEASED': 'Verbunden', 'ASSOCIATED': 'Wartet auf IP-Adresse',
                 'CONNECTING': 'Verbindet', 'STARTING': 'Startet', 'OFF': 'Aus',
-                'SCAN_ONLY': 'Nur WLAN-Suche',
+                'SCAN_ONLY': ('Reserve wartet; WLAN-Suche' if wan_state.get('reserve_deferred') else 'Nur WLAN-Suche'),
                 'CLEANUP_FAILED': 'Bereinigung fehlgeschlagen', 'missing': 'Nicht erkannt',
                 'ambiguous': 'Mehrere Funkmodule', 'idle': 'Nicht verbunden',
                 'online': 'Verbunden', 'ready': 'Verbunden', 'unavailable': 'Nicht verfuegbar',
             }.get(str(service['/WifiWan/State']), 'Nicht verbunden')
-            if 'wan' in vpn_state:
-                active = vpn_state['wan']
+            path_state = vpn_state if use_vpn else direct_state
+            service['/Wan/Health'] = 'Internet nicht bereit'
+            if 'wan' in path_state:
+                active = path_state['wan']
                 service['/Wan/Active'] = {'ethernet': 'Ethernet / Starlink', 'wifi': 'USB-WLAN'}.get(active, 'Kein geeigneter WAN-Pfad')
-                service['/Wan/Reason'] = ('Ethernet-Tunnel nicht erreichbar, WLAN aktiv'
+                service['/Wan/Reason'] = ('Direkt ueber USB-WLAN' if not use_vpn and active == 'wifi' else
+                    'Direkt ueber Ethernet / Starlink' if not use_vpn and active == 'ethernet' else
+                    'Ethernet-Tunnel nicht erreichbar, WLAN aktiv'
                     if active == 'wifi' and vpn_state.get('penalties', {}).get('ethernet') else
                     'Ethernet nicht erreichbar, WLAN aktiv' if active == 'wifi' and not vpn_state.get('health', {}).get('ethernet', {}).get('healthy') else
                     'VPN ueber bekanntes WLAN' if active == 'wifi' else 'VPN ueber Ethernet / Starlink'
                     if active == 'ethernet' else 'Wartet auf geeignete Verbindung')
-                service['/Wan/Health'] = 'VPN-Internet und DNS geprueft' if vpn_state.get('internet') else 'VPN-Internet nicht bereit'
+                service['/Wan/Health'] = (('VPN-Internet und DNS geprueft' if use_vpn else 'Internet und DNS geprueft')
+                    if path_state.get('internet') else 'Internet nicht bereit')
             requested = (bool(settings['ap_enabled']), str(settings['ap_ssid']),
                          AP_SECRET.stat().st_mtime_ns if AP_SECRET.exists() else 0,
-                         repr(routed_dns(configuration, vpn_state)))
-            if (Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()):
+                         repr(routed_dns(configuration, vpn_state)) if use_vpn else 'direct', use_vpn)
+            if wanted == 'off':
                 requested = (False, *requested[1:])
             if requested != signature:
                 failed = None
@@ -291,15 +375,21 @@ def main():
             ap_state = load_json(AP_ROOT / 'status.json', {})
             internet = bool(worker and ap_state.get('internet')
                             and vpn_worker and vpn_state.get('state') == 'READY')
+            if not use_vpn:
+                subnet = str(ipaddress.IPv4Network(ap_state['address'] + '/24', strict=False)) if ap_state.get('address') else ''
+                direct = direct_current(subnet, dns_settings(), alive)
+                internet = bool(worker and ap_state.get('internet') and direct_worker and direct)
+                service['/DNS/Active'] = direct['dns'] if direct else 'Nicht bereit'
+                service['/Security'] = 'AP direkt, ohne VPN; getrenntes Fahrzeugnetz' if internet else 'AP nur lokal'
             service['/Security'] = ('AP ueber VPN, DNSmith' if dns_settings()['dnsmith']
-                                   else 'AP ueber VPN, eigenen DNS') if internet else 'AP nur lokal'
+                                   else 'AP ueber VPN, eigenen DNS') if internet and use_vpn else service['/Security']
             service['/AP/Status'] = ('Fehler: Diagnose pruefen' if failed else
-                ('Internet ueber VPN' if internet else 'Lokal, ohne Internet'
-                 if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET') else 'Startet') if worker
+                (('Internet ueber VPN' if use_vpn else 'Internet ohne VPN') if internet else 'Lokal, ohne Internet'
+                 if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET', 'DIRECT_INTERNET') else 'Startet') if worker
                 else 'Aus')
             service['/AP/Address'] = ap_state.get('address', '') if worker else ''
-            service['/Status'] = ('WLAN-Internet ueber VPN' if internet else
-                                  'Lokales WLAN aktiv' if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET')
+            service['/Status'] = (('WLAN-Internet ueber VPN' if use_vpn else 'WLAN-Internet ohne VPN') if internet else
+                                  'Lokales WLAN aktiv' if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET', 'DIRECT_INTERNET')
                                   else 'Fahrzeug-WLAN startet') if worker else 'Netzwerkdiagnose'
         except Exception:
             logging.exception('Status refresh failed')
@@ -312,6 +402,12 @@ def main():
     try:
         loop.run()
     finally:
+        if direct_worker and direct_worker.poll() is None:
+            (DIRECT_ROOT / 'stop').touch()
+            try:
+                direct_worker.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                direct_worker.kill()
         if ENROLLMENT_ROOT.exists() and not ENROLLMENT_ROOT.is_symlink():
             try:
                 write_json(ENROLLMENT_ROOT / 'request.json', {'pid': os.getpid(), 'start': token(os.getpid()), 'enabled': False})

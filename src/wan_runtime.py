@@ -19,6 +19,11 @@ from storage import atomic_write, load_json, write_json
 from wan_config import station, dhcp_args, client_name
 from wan_bridge import plan, rules, ipv6_rules, bootstrap_rules
 from vpn_config import read as vpn_config
+from transport_config import read as transport_settings, direct_dns
+from dns_config import read as dns_settings
+from direct_status import current as direct_current
+from reserve_policy import Gate
+from wan_config import wan_mode
 import wan_bridge_runtime
 import owned_netns
 
@@ -201,9 +206,11 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
     profiles = sorted((p for p in store.data['profiles'].values() if p['autoconnect']),
                       key=lambda p: (-p['priority'], p['ssid']))
     for profile in profiles: station(profile, str(ROOT / 'control'))
-    vpn = vpn_config()
-    routable = bool(vpn and vpn['enabled'])
-    bootstrap = bool(auto_enroll and vpn is None)
+    use_vpn = transport_settings()['vpn_required']
+    vpn = vpn_config() if use_vpn else None
+    uplink = vpn if use_vpn else dict(direct_dns(dns_settings()), transport='direct')
+    routable = bool(not use_vpn or vpn and vpn['enabled'])
+    bootstrap = bool(use_vpn and auto_enroll and vpn is None)
     associate = routable or bootstrap
     candidates = Candidates(store.data, enabled=auto_open and associate)
     if not associate: profiles = []  # scan-only: no station association/DHCP
@@ -255,7 +262,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
             mutate(['ip', 'netns', 'exec', NS, 'sysctl', '-qw', 'net.ipv6.conf.' + option + '.disable_ipv6=1'])
         # Rules exist before the radio can transmit DHCP or IP data.
         if routable:
-            firewall = wan_bridge_runtime.configuration(vpn, mutate)
+            firewall = wan_bridge_runtime.configuration(uplink, mutate)
             for family, builder in (('iptables', rules(firewall, 'wan')), ('ip6tables', ipv6_rules('wan'))):
                 for table, chain, args in builder:
                     mutate(['ip', 'netns', 'exec', NS, family, '-w', '3', '-t', table, '-I', chain, '1', *args])
@@ -278,22 +285,48 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
         profile = None
         supplicant = dhcp = None
         scan_paused = False
+        scan_ready = not profiles
         started = 0
         last_health, health_failures = 0, 0
+        association, connection_id = None, ''
+        reserve_gate = Gate(time.monotonic())
         while not (ROOT / 'stop').exists():
             if not alive({'pid': parent_pid, 'start': parent_start}): break
+            if transport_settings()['vpn_required'] != use_vpn: break
             if not alive(load_json(ROOT / 'guard.json', {})): raise RuntimeError('WAN guard exited')
             if not namespace_owned(state): raise RuntimeError('WAN namespace lost')
             pulse()
             if not any(v['ifindex'] == state['ifindex'] for v in radio_info(True)):
                 raise RuntimeError('USB radio unplugged')
+            path_root = Path('/run/roadlink-vpn' if use_vpn else '/run/roadlink-direct')
+            reserve_allowed = reserve_gate.allow(wan_mode(), load_json(path_root / 'status.json', {}),
+                all(alive(load_json(path_root / (name + '.json'), {})) for name in ('controller', 'guard')),
+                time.monotonic())
+            if profile and profile.get('last_resort') and not reserve_allowed:
+                stop_children(); supplicant = dhcp = None
+                inside(['ip', 'link', 'set', RADIO, 'down'])
+                inside(['ip', '-4', 'addr', 'flush', 'dev', RADIO])
+                inside(['ip', '-4', 'route', 'flush', 'default'], check=False)
+                write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
+                profile, association, connection_id, retry = None, None, '', 0
+                scan_ready = False
             if profile is None and associate:
-                profile = candidates.select(load_json(ROOT / 'scan.json', {}), time.time(), time.monotonic())
+                profile = candidates.select(load_json(ROOT / 'scan.json', {}), time.time(), time.monotonic(),
+                                            allow_last_resort=reserve_allowed)
             if profile is None:
+                if not scan_ready:
+                    inside(['ip', 'link', 'set', RADIO, 'down'])
+                    inside(['ip', '-4', 'addr', 'flush', 'dev', RADIO])
+                    inside(['ip', '-4', 'route', 'flush', 'default'], check=False)
+                    inside(['ip', 'link', 'set', RADIO, 'address', profile_mac(bytes.fromhex(store.data['seed']), 'passive-scan')])
+                    inside(['ip', 'link', 'set', RADIO, 'up'])
+                    write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
+                    scan_ready = True
                 if candidates.enabled and time.monotonic() >= next_scan and not scanner.pending():
                     write_json(ROOT / 'scan-request.json', {'request': secrets.token_hex(12)})
                     next_scan = time.monotonic() + 150
                 write_json(ROOT / 'status.json', {'state': 'SCAN_ONLY', 'ssid': '', 'internet': False,
+                           'reserve_deferred': not reserve_allowed,
                            'driver': state['driver'], 'interface': RADIO, 'identity': state['identity']})
                 scanner.tick(True)
                 time.sleep(1)
@@ -315,6 +348,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                 continue
             scan_paused = False
             if supplicant is None and time.monotonic() >= retry:
+                scan_ready = False
                 inside(['ip', 'link', 'set', RADIO, 'down'])
                 inside(['ip', '-4', 'addr', 'flush', 'dev', RADIO])
                 if inside(['ip', '-4', 'route', 'show', 'default'], check=False).stdout.strip():
@@ -329,6 +363,10 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
             response = inside(['wpa_cli', '-p', str(ROOT / 'control'), '-i', RADIO, 'status'], check=False)
             status = dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
             connected = status.get('wpa_state') == 'COMPLETED'
+            current_association = (profile['id'], status.get('bssid', '')) if connected else None
+            if current_association != association:
+                connection_id = secrets.token_hex(12) if connected else ''
+                association = current_association
             if connected:
                 radios = inside(['iw', 'dev']).stdout
                 if radios.count('Interface ') != 1 or 'type managed' not in radios:
@@ -352,16 +390,25 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                        'ssid': profile['ssid'] if connected else '', 'profile_id': profile['id'],
                        'identity': state['identity'], 'driver': state['driver'], 'interface': RADIO,
                        'address': lease.get('address', '') if leased else '', 'internet': False,
+                       'connection_id': connection_id if leased else '',
+                       'lease': {key: lease.get(key, '') for key in ('address', 'gateway')} if leased else None,
                        'bridge': bridge, 'bootstrap': bootstrap})
             failed = (supplicant and supplicant.poll() is not None) or (dhcp and dhcp.poll() is not None)
             vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
-            if (leased and profile.get('discovered') and vpn_state.get('state') == 'READY'
+            proven = (use_vpn and vpn_state.get('state') == 'READY'
                     and vpn_state.get('internet') and vpn_state.get('dns_ready')
                     and vpn_state.get('wifi_profile_id') == profile['id']
-                    and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {}))):
+                    and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {})))
+            if not use_vpn and leased:
+                import ipaddress
+                ap_address = load_json(Path('/run/roadlink-ap/status.json'), {}).get('address')
+                subnet = str(ipaddress.IPv4Network(ap_address + '/24', strict=False)) if ap_address else ''
+                direct = direct_current(subnet, dns_settings(), alive)
+                proven = bool(direct and direct['kind'] == 'wifi')
+            if leased and profile.get('discovered') and proven:
                 Profiles().remember_open(profile['ssid'])
                 profile['discovered'] = False
-            tunnel_failed = (leased and vpn_state.get('penalties', {}).get('wifi', False)
+            tunnel_failed = (use_vpn and leased and vpn_state.get('penalties', {}).get('wifi', False)
                              and vpn_state.get('wifi_penalty_profile') == profile['id'])
             if failed or health_failures >= 2 or tunnel_failed or (supplicant and not leased and time.monotonic() - started > 45):
                 stop_children(); supplicant = dhcp = None

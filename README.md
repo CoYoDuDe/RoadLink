@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.18 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.20 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -31,14 +31,14 @@ Das Fahrzeug-WLAN heißt bei Neuinstallation **RoadLink**. Es gibt kein gemeinsa
 - Unter **Internet und Umschaltung → VPN-Anbieter** zwischen DNSmith und eigenem WireGuard-Server wechseln. Beide Konfigurationen bleiben lokal gespeichert. Für den eigenen Server den angezeigten Geräte-Public-Key dort registrieren und Serveradresse, Port, Server-Public-Key, Clientadresse und VPN-DNS eintragen.
 - Externe WLANs suchen, hinzufügen, bearbeiten und entfernen; WPA2 oder offen.
 - Gespeicherte, freigegebene WLANs automatisch verbinden; Priorität selbst festlegen.
-- Optional unbekannte offene WLANs automatisch suchen und prüfen. Der Schalter startet ausgeschaltet. Erst nach bestätigtem VPN-, DNS- und Internetzugang über dieses WLAN wird es als bekanntes Netz gespeichert. Fehlgeschlagene Netze werden mit Wartezeit erneut geprüft.
-- Profile als letzte Reserve markieren; normale bekannte oder gefundene offene Netze erhalten Vorrang. Innerhalb der Gruppe entscheidet die eingestellte Priorität.
+- Optional unbekannte offene WLANs automatisch suchen und prüfen. Der Schalter startet ausgeschaltet. Erst nach bestätigtem Internet und DNS über dieses WLAN wird es gespeichert; bei eingeschaltetem VPN muss auch der Tunnel funktionieren. Fehlgeschlagene Netze werden mit Wartezeit erneut geprüft.
+- Profile als letzte Reserve markieren. Sie bleiben bei funktionierendem Ethernet getrennt; normale bekannte oder gefundene offene Netze erhalten Vorrang. Innerhalb der Gruppe entscheidet die Priorität. „Nur WLAN“ erlaubt die Reserve auch bei gesundem Ethernet.
 - Optionalen Gerätenamen für externe WLANs einstellen; leer sendet keinen DHCP-Namen. Der Betreiber kann eine eigene Bezeichnung anzeigen. Der Fahrzeug-WLAN-Name ist unabhängig davon.
 - Ethernet/Starlink oder USB-WLAN für den verschlüsselten VPN-Tunnel wählen.
 - Aktives Netz, verbundenes WLAN und geprüften Internet-/DNS-Status im klassischen Venus-Menü sehen.
 - Automatische Umschaltung bei Ausfall mit verzögerter Rückkehr, damit die Verbindung nicht ständig wechselt.
 
-**Das Fahrzeug-WLAN erhält Internet nur über den geprüften VPN-Tunnel.** Eine WLAN-Verbindung oder IP-Adresse allein reicht nicht. Ethernet und SSH für den Gerätezugang bleiben erhalten. WLAN-Betreiber können weiterhin einen verbundenen Teilnehmer erkennen; RoadLink macht ihn nicht unsichtbar.
+**Standardmäßig erhält das Fahrzeug-WLAN Internet über den geprüften VPN-Tunnel.** Ein direkter Betrieb muss ausdrücklich gewählt werden. Eine WLAN-Verbindung oder IP-Adresse allein reicht nicht. Ethernet und SSH für den Gerätezugang bleiben erhalten. WLAN-Betreiber können weiterhin einen verbundenen Teilnehmer erkennen; RoadLink macht ihn nicht unsichtbar.
 
 ## Verbindungsmodi
 
@@ -50,11 +50,13 @@ Der VPN-Tunnel führt vom Pi zu einem externen WireGuard-Server. DNSmith ist der
 
 **DNSmith-VPN** ist standardmäßig ausgewählt. Ausschalten wählt einen eigenen WireGuard-Server und zeigt dessen Felder. Ohne gespeicherte eigene Konfiguration bleibt das Fahrzeug-Internet gesperrt. Zurückschalten stellt die DNSmith-Konfiguration wieder her; bei einem neuen Gerät wird sie automatisch eingerichtet. **DNSmith automatisch einrichten** steuert nur die Registrierung und beendet keinen vorhandenen Tunnel.
 
-Unter **Internet und Umschaltung → DNS-Anbieter** ist **DNSmith-DNS** standardmäßig eingeschaltet. Ausschalten zeigt die Felder für einen eigenen öffentlichen IPv4-DNS und einen optionalen zweiten DNS. Neue Adressen erst speichern; bis dahin bleibt der bisherige Anbieter aktiv. Beide DNS-Adressen werden durch den VPN geprüft. Antwortet der erste nicht, wird der zweite verwendet. Beim Wechsel startet das Fahrzeug-WLAN neu, damit Firewall und DHCP dieselbe DNS-Adresse verwenden. Ohne erreichbaren DNS wird kein Internet als bereit angezeigt. Zurückschalten erhält die eigenen gespeicherten Adressen.
+Unter **Internet und Umschaltung → DNS-Anbieter** ist **DNSmith-DNS** standardmäßig eingeschaltet. Ausschalten zeigt die Felder für einen eigenen öffentlichen IPv4-DNS und einen optionalen zweiten DNS. Neue Adressen erst speichern; bis dahin bleibt der bisherige Anbieter aktiv. Beide DNS-Adressen werden über den gewählten Internetpfad geprüft. Antwortet der erste nicht, wird der zweite verwendet. Beim Wechsel aktualisiert RoadLink Firewall und DHCP; im VPN-Betrieb startet dazu das Fahrzeug-WLAN neu. Ohne erreichbaren DNS wird kein Internet als bereit angezeigt. Zurückschalten erhält die eigenen gespeicherten Adressen.
 
 Die DNS-Auswahl gilt unabhängig vom VPN-Anbieter. Mit DNSmith-VPN wird der interne DNSmith-Resolver verwendet; mit einem anderen VPN wird DNSmith über seine öffentliche Adresse erreicht. Der Profil-DNS im eigenen VPN bleibt als ursprüngliche Serverangabe gespeichert; den tatsächlich verwendeten DNS legt das Menü **DNS-Anbieter** fest.
 
-Ein ausdrücklicher Modus **Internet ohne VPN** ist ebenfalls geplant. Auch dort müssen eigenes DHCP, NAT, Firewall und die Sperre neuer eingehender Zugriffe erhalten bleiben. Ohne VPN entfällt dessen Verschlüsselung gegenüber dem externen WLAN. **Dieser Modus ist noch nicht verfügbar:** VPN-Abschalten sperrt derzeit das Fahrzeug-Internet. Es gibt keinen stillen unverschlüsselten Rückfall.
+Unter **Internet und Umschaltung** ist **Internet über VPN** standardmäßig eingeschaltet. Ausschalten wählt ausdrücklich den direkten Betrieb. Eigene IP-Vergabe, NAT und Firewall trennen weiterhin das Fahrzeugnetz vom externen WLAN. Ohne VPN entfallen die Tunnelverschlüsselung und dessen DNS-Schutz; DNS wird direkt an den gewählten öffentlichen Resolver gesendet. HTTPS bleibt durch die jeweilige Anwendung verschlüsselt.
+
+Beim Wechsel beendet RoadLink zunächst den bisherigen Modus und prüft dessen Bereinigung. Erst danach startet der gewählte Modus. VPN-Profile und Schlüssel bleiben gespeichert. Scheitert die Bereinigung, startet der neue Modus nicht. Ein VPN-Ausfall schaltet niemals automatisch auf unverschlüsselten Betrieb um. Bei DNSmith-DNS verwendet der direkte Betrieb dessen öffentliche Adresse; eigene primäre und sekundäre DNS-Adressen bleiben unabhängig einstellbar.
 
 | Modus | Verhalten |
 |---|---|

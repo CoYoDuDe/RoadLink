@@ -4,7 +4,7 @@ import json
 import secrets
 from pathlib import Path
 from storage import load_json, write_json
-from wan_bridge import HOST, PEER, TAG, plan, rules, ipv6_rules
+from wan_bridge import HOST, PEER, TAG, plan, canonical, rules, ipv6_rules
 
 
 def command_for(family, action, item):
@@ -13,11 +13,15 @@ def command_for(family, action, item):
 
 
 def configuration(vpn, command):
+    if vpn.get('transport', 'vpn') not in ('vpn', 'direct'):
+        raise ValueError('Unknown bridge transport')
     values = json.loads(command(['ip', '-j', '-4', 'route', 'show', 'table', 'all']).stdout)
     networks = [ipaddress.IPv4Network(v['dst'], strict=False) for v in values if v.get('dst') not in (None, 'default')]
     for subnet in ('172.27.250.0/30', '10.250.250.0/30', '192.168.250.0/30'):
         if not any(ipaddress.IPv4Network(subnet).overlaps(n) for n in networks): break
     else: raise RuntimeError('No unused private WAN transit subnet')
+    if vpn.get('transport') == 'direct':
+        return canonical(dict(vpn, subnet=subnet))
     return plan(vpn['endpoint'], vpn['port'], subnet)
 
 
@@ -26,7 +30,7 @@ def start(root, state, bridge, command, inside):
         raise RuntimeError('WAN veth name already occupied')
     if Path('/proc/sys/net/ipv4/conf/all/rp_filter').read_text().strip() != '0':
         raise RuntimeError('Global strict reverse-path filtering requires additional WAN support')
-    bridge = plan(bridge['endpoint'], int(bridge['port']), bridge['subnet'])
+    bridge = canonical(bridge)
     state['bridge'] = bridge
     # A private random peer name proves the down pair's identity even if the
     # controller dies before the kernel has accepted its explicit alias.

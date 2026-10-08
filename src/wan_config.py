@@ -51,3 +51,10 @@ def dhcp_args(interface, hook, hostname=''):
     return ['udhcpc', '-f', '-B', '-n', '-t', '3', '-T', '3', '-o', '-C', '-V', '',
             '-O', '1', '-O', '3', '-O', '51', '-O', '54'] + (
             ['-x', 'hostname:' + hostname] if hostname else []) + ['-i', interface, '-s', str(hook)]
+def wan_mode():
+    import dbus
+    try:
+        item = dbus.SystemBus().get_object('com.victronenergy.settings', '/Settings/RoadLink/Wan/Mode')
+        return str(dbus.Interface(item, 'com.victronenergy.BusItem').GetValue())
+    except dbus.DBusException:
+        return 'AUTO'

@@ -17,6 +17,7 @@ from wan_bridge import MARK
 from wan_health import probe as https_probe
 from policy import Selector, Link, MODES
 from dns_health import choose as choose_dns
+from transport_config import read as transport_settings
 
 ROOT = Path('/run/roadlink-vpn')
 INTERFACE = 'wgroadlink'
@@ -115,6 +116,10 @@ def stop():
 def serve(parent_pid, parent_start):
     if os.geteuid() != 0:
         raise PermissionError('Root required')
+    if not transport_settings()['vpn_required']:
+        raise RuntimeError('VPN transport is not selected')
+    if alive(load_json(Path('/run/roadlink-direct/guard.json'), {})):
+        raise RuntimeError('Direct cleanup must finish before VPN startup')
     config = read()
     if not config or not config['enabled']:
         raise ValueError('VPN not configured/enabled')
@@ -234,6 +239,7 @@ def serve(parent_pid, parent_start):
                    'address': config['address'], 'dns': active_dns or '', 'wan': active or '', 'health': health,
                    'mode': mode, 'wifi_profile_id': (selected_route or {}).get('profile_id', '') if active == 'wifi' else '',
                    'wifi_penalty_profile': wifi_penalty_profile,
+                   'checked_at': last_probe,
                    'penalties': {key: time.monotonic() < expiry for key, expiry in penalties.items()}})
         time.sleep(1)
     # The independent guard owns final cleanup and keeps the flock until done.

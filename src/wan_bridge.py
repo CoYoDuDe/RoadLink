@@ -34,7 +34,8 @@ def plan(endpoint, port, subnet='172.27.250.0/30'):
     network = ipaddress.IPv4Network(subnet)
     private = any(network.subnet_of(ipaddress.IPv4Network(block))
                   for block in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
-    if (not endpoint.is_global or type(port) is not int or not 1 <= port <= 65535
+    if (not endpoint.is_global or endpoint.is_multicast or endpoint.is_reserved
+            or type(port) is not int or not 1 <= port <= 65535
             or network.prefixlen != 30 or not private):
         raise ValueError('Public VPN endpoint and private /30 required')
     return {'endpoint': str(endpoint), 'port': str(port), 'subnet': str(network),
@@ -48,7 +49,11 @@ def rules(config, scope):
     IPv6 rules are separate and never have allowances. Interface names are
     fixed; source/destination validation is mandatory before use.
     """
-    config = plan(config['endpoint'], int(config['port']), config['subnet'])
+    if config.get('transport') == 'direct':
+        from direct_bridge import rules as direct_rules
+        yield from direct_rules(config, scope)
+        return
+    config = canonical(config)
     tag = ['-m', 'comment', '--comment', TAG]
     endpoint, port = config['endpoint'], config['port']
     established = ['-m', 'conntrack', '--ctstate', 'ESTABLISHED']
@@ -84,6 +89,20 @@ def rules(config, scope):
                '-p', 'udp', '--dport', port] + tag + ['-j', 'MASQUERADE'])
     else:
         raise ValueError('Unknown firewall scope')
+
+
+def canonical(config):
+    """Keep the selected mode in the ownership journal; reject unknown modes."""
+    mode = config.get('transport', 'vpn')
+    if mode == 'direct':
+        from direct_bridge import plan as direct_plan
+        return direct_plan(config['subnet'], config['dns'], config.get('dns_secondary', ''))
+    if mode != 'vpn':
+        raise ValueError('Unknown bridge transport')
+    port = config['port']
+    if type(port) is not int and not (type(port) is str and port.isascii() and port.isdigit()):
+        raise ValueError('Invalid bridge endpoint port')
+    return plan(config['endpoint'], int(port), config['subnet'])
 
 
 def ipv6_rules(scope):

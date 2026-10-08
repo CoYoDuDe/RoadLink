@@ -4,18 +4,18 @@ import socket
 import ssl
 import sys
 import time
+from probe_binding import bind_path
 
 ADDRESS = '1.1.1.1'
 NAME = 'one.one.one.one'
 
 
-def probe(interface, source=None):
+def probe(interface, source=None, mark=None):
     started = time.monotonic()
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(2)
-            if source: sock.bind((source, 0))
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode() + b'\0')
+            bind_path(sock, source, interface, mark)
             sock.connect((ADDRESS, 443))
             with ssl.create_default_context().wrap_socket(sock, server_hostname=NAME) as secure:
                 secure.sendall(b'HEAD / HTTP/1.1\r\nHost: one.one.one.one\r\nConnection: close\r\n\r\n')

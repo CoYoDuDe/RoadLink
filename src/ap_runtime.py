@@ -14,6 +14,9 @@ from hardware import inspect_interfaces, resolve_role
 from storage import atomic_write, load_json, write_json
 from vpn_config import read as vpn_config
 from dns_config import routed as routed_dns, ready as dns_ready
+from dns_config import read as dns_settings
+from transport_config import read as transport_settings
+from direct_status import current as direct_current
 import ap_router
 
 ROOT = Path('/run/roadlink-ap')
@@ -182,7 +185,8 @@ def serve(ssid, parent_pid, parent_start):
     routes = json.loads(command(['ip', '-j', '-4', 'route', 'show', 'table', 'all']).stdout)
     subnet = choose_subnet([r['dst'] for r in routes if r.get('dst') not in (None, 'default')])
     address = str(ipaddress.ip_network(subnet)[1])
-    vpn = vpn_config()
+    use_vpn = transport_settings()['vpn_required']
+    vpn = vpn_config() if use_vpn else None
     vpn_status = load_json(Path('/run/roadlink-vpn/status.json'), {})
     routing = ap_router.plan(subnet, routed_dns(vpn, vpn_status)) if vpn and vpn['enabled'] else None
     config += 'ctrl_interface=' + str(ROOT / 'control') + '\n'
@@ -231,6 +235,9 @@ def serve(ssid, parent_pid, parent_start):
         if not (ROOT / 'cleaning').exists() and (ap.poll() is not None or dhcp_process.poll() is not None):
             (ROOT / 'stop').touch()
         if not (ROOT / 'stop').exists():
+            if transport_settings()['vpn_required'] != use_vpn:
+                (ROOT / 'stop').touch()
+                continue
             atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
             response = command(['hostapd_cli', '-p', str(ROOT / 'control'), '-i', INTERFACE, 'status'], check=False)
             ready = 'state=ENABLED' in response.stdout.splitlines()
@@ -244,6 +251,10 @@ def serve(ssid, parent_pid, parent_start):
                             and alive(load_json(Path('/run/roadlink-vpn/controller.json'), {}))
                             and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {})))
             desired_dns = routing['dns'] if internet else None
+            if not use_vpn:
+                direct = direct_current(subnet, dns_settings(), alive)
+                internet = bool(ready and direct)
+                desired_dns = direct['dns'] if internet else None
             if desired_dns != advertised_dns:
                 dhcp = isolated_dhcp(INTERFACE, subnet, desired_dns).replace(
                     '/run/roadlink/ap.leases', str(ROOT / 'leases'))
@@ -258,7 +269,7 @@ def serve(ssid, parent_pid, parent_start):
                 dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground',
                                       '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
                 advertised_dns = desired_dns
-            write_json(ROOT / 'status.json', {'state': 'VPN_INTERNET' if internet else
+            write_json(ROOT / 'status.json', {'state': ('VPN_INTERNET' if use_vpn else 'DIRECT_INTERNET') if internet else
                        'LAN_ONLY' if ready else 'STARTING', 'address': address,
                        'ssid': ssid, 'internet': internet, 'dns': advertised_dns or ''})
         time.sleep(2)

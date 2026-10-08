@@ -3,9 +3,10 @@ import ipaddress
 import os
 import socket
 import struct
+from probe_binding import bind_path
 
 
-def probe(source, resolver):
+def probe(source, resolver, interface=None, mark=None):
     identifier = int.from_bytes(os.urandom(2), 'big')
     question = b'\x07example\x03com\x00' + struct.pack('!HH', 1, 1)
     request = struct.pack('!6H', identifier, 0x0100, 1, 0, 0, 0) + question
@@ -14,7 +15,7 @@ def probe(source, resolver):
         resolver = str(ipaddress.IPv4Address(resolver))
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.settimeout(2)
-            sock.bind((source, 0))
+            bind_path(sock, source, interface, mark)
             sock.connect((resolver, 53))
             sock.send(request)
             response = sock.recv(4096)

@@ -15,7 +15,7 @@ class Candidates:
         self.failures[identifier] = count
         self.blocked[identifier] = now + min(900, 60 * 2 ** (count - 1))
 
-    def select(self, scan, wall_time, now):
+    def select(self, scan, wall_time, now, allow_last_resort=True):
         choices = sorted((p for p in self.profiles if p['autoconnect'] and not p.get('last_resort', False)),
                          key=lambda p: (-p['priority'], p['ssid']))
         fallback = sorted((p for p in self.profiles if p['autoconnect'] and p.get('last_resort', False)),
@@ -34,6 +34,6 @@ class Candidates:
                                 'priority': 0, 'autoconnect': True, 'vpn_required': True,
                                 'mac': profile_mac(self.seed, identifier), 'discovered': True})
         # With auto-open enabled, search once before using last-resort WLANs.
-        if not self.enabled or (fresh and scan.get('state') in ('COMPLETE', 'FAILED')):
+        if allow_last_resort and (not self.enabled or (fresh and scan.get('state') in ('COMPLETE', 'FAILED'))):
             choices += fallback
         return next((p for p in choices if now >= self.blocked.get(p['id'], 0)), None)
