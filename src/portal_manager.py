@@ -12,6 +12,7 @@ import portal_session_runtime as runtime
 import portal_state
 import portal_pins
 import portal_review
+import portal_completion
 from storage import load_json
 
 
@@ -19,6 +20,7 @@ class Manager:
     def __init__(self,service,owner,is_alive,itemtype=None):
         self.owner,self.alive=owner,is_alive
         self.worker=None
+        self.completed=None
         self.api=portal_api.API(service,is_alive,self.busy,itemtype=itemtype)
         self.known_api=portal_known_api.API(service)
 
@@ -64,14 +66,22 @@ class Manager:
         self.known_api.update()
         if self.worker and self.worker.poll() is not None:self.worker=None
         if not enabled:
+            self.completed=None
             self.cancel()
             self.api.refresh(None,'STOPPING' if self.busy() else 'OFF')
             self.api.service['/Portal/FormStatus']=''
             return
+        success=portal_completion.collect(self.owner,self.alive)
+        if success:
+            self.completed=success
+            self.cancel()
         view=self.view()
         intent=self.api.take()
-        if intent and intent['action']=='stop':self.cancel()
+        if intent and intent['action']=='stop':
+            self.completed=None
+            self.cancel()
         elif intent and intent['action']=='start':
+            self.completed=None
             try:
                 if self.busy() or view is None:raise ValueError('Portal unavailable')
                 session=intent['session']
@@ -84,5 +94,8 @@ class Manager:
                 self.api.service['/Portal/EditStatus']='Anmeldung nicht gestartet; erneut auswaehlen'
         status=load_json(runtime.ROOT/'status.json',{}).get('state','OFF')
         if self.worker and self.worker.poll() is None and status=='OFF':status='STARTING'
+        if (self.completed and not self.busy() and status!='CLEANUP_FAILED'
+                and 0<=time.monotonic()-self.completed['checked_at']<=30):
+            status='COMPLETED'
         self.api.refresh(view,status)
         self.api.service['/Portal/FormStatus']=self.form_status(view)

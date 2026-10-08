@@ -229,6 +229,7 @@ def run(device_id,expected=None):
         write_json(ROOT/'session.json',session);write_json(ROOT/'controller.json',owner)
         registered=True
         write_json(ROOT/'mutation.json',{});write_json(ROOT/'result.json',{'cleaned':False})
+        write_json(ROOT/'login-ready.json',{})
         pulse()
         guardian=subprocess.Popen([sys.executable,__file__,'guard',json.dumps(owner),str(lock_fd),str(ns_fd)],
                                    pass_fds=(lock_fd,ns_fd),stdin=subprocess.DEVNULL)
@@ -261,6 +262,10 @@ def run(device_id,expected=None):
         signal.signal(signal.SIGINT,terminate)
         while True:
             state=access.step()
+            if state=='LOGIN_READY' and not load_json(ROOT/'login-ready.json',{}):
+                check()
+                write_json(ROOT/'login-ready.json',{'id':session['id'],'owner':owner,
+                                                    'ready_at':time.monotonic()})
             write_json(ROOT/'status.json',{'state':state,'internet':False,'device_id':device_id})
             if state=='WAITING_TARGETS':time.sleep(.2)
     finally:

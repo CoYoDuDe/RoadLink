@@ -23,7 +23,7 @@ class Live:
     def bundle(self):
         return {key:self.read(self.root/(name+'.json'),{}) for key,name in FILES.items()}
 
-    def inspect(self):
+    def inspect(self, require_page=True):
         if self.stopping(): raise RuntimeError('Portal transport is stopping')
         bundle=self.bundle()
         state=bundle['state']
@@ -53,7 +53,7 @@ class Live:
                 or self.query('links')!=links):
             raise RuntimeError('Portal transport changed during evidence collection')
         now=time.monotonic()
-        if portal_session.snapshot(bundle,bundle['result'],now,self.alive)!=portal_session.snapshot(after,after['result'],now,self.alive):
+        if require_page and portal_session.snapshot(bundle,bundle['result'],now,self.alive)!=portal_session.snapshot(after,after['result'],now,self.alive):
             raise RuntimeError('Portal login page changed during evidence collection')
         return inventory,after,after['result']
 

@@ -56,9 +56,12 @@ def create(identifier, device_id, inventory, wan, result, now, is_alive, duratio
     return value
 
 
-def validate(session, inventory, wan, result, now, is_alive, internet_proven=False):
-    """Recheck before each mutation/reply; successful WiFi Internet revokes bypass."""
-    if internet_proven: raise ValueError('Portal login completed')
+def validate_connection(session, inventory, wan, now, is_alive):
+    """Check the selected device and transport, without granting portal access.
+
+    The login page may disappear after success. This weaker check is only for
+    collecting completion evidence, never for installing or retaining bypass.
+    """
     if session.get('schema') != 1 or not isinstance(session.get('id'), str) or not re.fullmatch(r'[0-9a-f]{24}', session['id']):
         raise ValueError('Invalid portal session')
     portal_origins.urls(dict(url=session['wan']['url'],additional_urls=session.get('additional_urls',[])))
@@ -73,6 +76,21 @@ def validate(session, inventory, wan, result, now, is_alive, internet_proven=Fal
     device = portal_clients.select(session['device']['id'], inventory['clients'])
     if {key: device[key] for key in ('id', 'ip', 'mac')} != session['device']:
         raise ValueError('Portal login device changed')
+    selected = session['wan']
+    if (wan['connection'] != selected['connection']
+            or not wan_lease.current(wan['lease'], wan['connection'])
+            or {key: wan['lease'][key] for key in ('address', 'gateway')} != selected['lease']
+            or any(identity(wan[key]) != selected[key] for key in ('controller', 'guard', 'dhcp'))
+            or not wan_lease.owned(wan['connection'], wan['dhcp'], wan['controller'],
+                                   wan['guard'], wan['state'], is_alive)):
+        raise ValueError('Portal WLAN transport changed')
+    return session
+
+
+def validate(session, inventory, wan, result, now, is_alive, internet_proven=False):
+    """Recheck before each mutation/reply; successful WiFi Internet revokes bypass."""
+    if internet_proven: raise ValueError('Portal login completed')
+    validate_connection(session, inventory, wan, now, is_alive)
     if snapshot(wan, result, now, is_alive) != session['wan']:
         raise ValueError('Portal WLAN or login page changed')
     return session

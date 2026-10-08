@@ -104,4 +104,5 @@ class API:
         service['/Portal/Status']={'OFF':'Fahrzeuggeraet fuer Anmeldung auswaehlen' if url else 'Keine WLAN-Anmeldung erforderlich',
             'WAITING_TARGETS':'Portal-Adressen werden geprueft','LOGIN_READY':'Anmeldeseite am ausgewaehlten Geraet oeffnen',
             'STARTING':'Anmeldung wird vorbereitet','STOPPING':'Anmeldung wird beendet',
+            'COMPLETED':'WLAN-Anmeldung erfolgreich; Internet mit VPN geprueft',
             'CLEANUP_FAILED':'Aufraeumen fehlgeschlagen; Freigabe bleibt gesperrt'}.get(state,'Anmeldung wird vorbereitet')
