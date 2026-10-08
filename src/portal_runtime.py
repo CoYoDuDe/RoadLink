@@ -90,6 +90,27 @@ class Context:
         if status.get('wpa_state') != 'COMPLETED' or status.get('bssid', '').lower() != self.binding.get('bssid'):
             raise RuntimeError('Portal WLAN association changed')
 
+    def radio_identity(self):
+        """Read actual associated SSID/private WAN MAC, never profile credentials."""
+        self.check()
+        links=json.loads(subprocess.run(['ip','-j','link','show','dev',portal_access.RADIO],
+            check=True,capture_output=True,text=True,timeout=2).stdout)
+        response=subprocess.run(['wpa_cli','-p',str(ROOT/'control'),'-i',portal_access.RADIO,'status'],
+            check=True,capture_output=True,text=True,timeout=2).stdout
+        fields={}
+        for line in response.splitlines():
+            if '=' not in line:continue
+            key,value=line.split('=',1)
+            if key in fields:raise ValueError('Ambiguous WLAN identity')
+            fields[key]=value
+        if (len(links)!=1 or links[0].get('ifindex')!=self.binding['ifindex']
+                or fields.get('wpa_state')!='COMPLETED'
+                or fields.get('bssid','').lower()!=self.binding['bssid']):
+            raise RuntimeError('Portal WLAN identity changed')
+        value={'ssid':fields['ssid'],'bssids':[self.binding['bssid']],'wan_mac':links[0]['address']}
+        self.check()
+        return value
+
     @contextmanager
     def permit(self, sock, address, remote_port, protocol):
         self.check()

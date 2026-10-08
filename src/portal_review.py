@@ -11,6 +11,7 @@ import time
 import portal_forms
 import portal_form_fetch
 import portal_pins
+import portal_candidate
 
 
 def matching(request, result):
@@ -84,5 +85,9 @@ def inspect(request, context, evidence, session_check):
               'forms': forms}
     # No raw target URLs (often session-bearing) in diagnostics or records.
     result['redirect_hashes'] = [digest(url) for url in page['redirects']]
+    radio = getattr(context, 'radio_identity', None)
+    if radio is not None:
+        candidate = portal_candidate.observe(page, radio())
+        if candidate is not None: result['candidate'] = candidate
     check()
     return result

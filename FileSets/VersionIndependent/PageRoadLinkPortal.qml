@@ -8,6 +8,8 @@ MbPage {
     property VBusItem available: VBusItem { bind: "com.coyodude.roadlink/Portal/Available" }
     property VBusItem selected: VBusItem { bind: "com.coyodude.roadlink/Portal/SelectedDevice" }
     property VBusItem state: VBusItem { bind: "com.coyodude.roadlink/Portal/State" }
+    property VBusItem rememberAvailable: VBusItem { bind: "com.coyodude.roadlink/Portal/Remember/Available" }
+    property VBusItem rememberId: VBusItem { bind: "com.coyodude.roadlink/Portal/Remember/ID" }
     model: VisibleItemModel {
         MbItemOptions {
             description: qsTr("Bekannte Portale automatisch")
@@ -19,6 +21,27 @@ MbPage {
         MbSubMenu { description: qsTr("Bekannte Portale"); subpage: Component { PageRoadLinkKnownPortals {} } }
         MbItemValue { description: qsTr("Portalprofile"); item.bind: "com.coyodude.roadlink/Portal/Known/Status" }
         MbItemValue { description: qsTr("Status"); item.bind: "com.coyodude.roadlink/Portal/Status" }
+        MbItemValue {
+            description: qsTr("Erfolgreiches Portal")
+            item.bind: "com.coyodude.roadlink/Portal/Remember/Summary"
+            show: root.rememberAvailable.value === 1
+        }
+        MbItemText {
+            text: qsTr("Nur bestaetigen, wenn diese Anmeldung kostenlos war und du die Bedingungen selbst akzeptiert hast. Bei unveraendertem Formular darf RoadLink dies kuenftig automatisch tun.")
+            wrapMode: Text.WordWrap
+            show: root.rememberAvailable.value === 1
+        }
+        MbItemOptions {
+            description: qsTr("Kostenloses Portal merken")
+            bind: "com.coyodude.roadlink/Portal/Remember/Request"
+            writeAccessLevel: User.AccessInstaller
+            show: root.rememberAvailable.value === 1
+            enabled: root.rememberAvailable.value === 1 && root.rememberId.value !== ""
+            readonly: !userHasWriteAccess || !enabled
+            possibleValues: [MbOption { description: qsTr("Abbrechen"); value: "" },
+                MbOption { description: qsTr("Kostenlos und Bedingungen akzeptiert"); value: "remember:" + root.rememberId.value }]
+        }
+        MbItemValue { description: qsTr("Portal merken"); item.bind: "com.coyodude.roadlink/Portal/Remember/Status" }
         MbSubMenu {
             description: qsTr("Fahrzeuggeraet auswaehlen")
             show: root.deviceId === ""

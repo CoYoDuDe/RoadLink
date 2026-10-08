@@ -50,7 +50,9 @@ Die Freigabe gilt nur für die geprüfte Portal-Adresse und höchstens 15 Minute
 
 Benötigt die Seite weitere Domains, vor dem Start bis zu drei davon mit Komma getrennt eintragen. Die Freigabe gilt nur für diese Anmeldung; zusätzliche Domains werden nicht automatisch übernommen.
 
-**Bekannte Portale automatisch** startet mit **Ein**. Unter **Bekannte Portale** kann die Einstellung je bestätigtem Profil geändert werden. Die Schalter und Profilspeicherung sind vorhanden; das Erfassen erfolgreicher manueller Anmeldungen und die automatische Anmeldung werden noch entwickelt. Der Schalter allein bestätigt keine Bedingungen und schaltet kein Internet frei. Geänderte Bedingungen, Zahlung, SMS, CAPTCHA oder persönliche Angaben erfordern eine manuelle Prüfung.
+Nach erfolgreicher manueller Anmeldung prüft RoadLink Internet und DNS über den VPN derselben WLAN-Verbindung und beendet die Portal-Freigabe. Bei einem unterstützten einfachen Formular erscheint **Kostenloses Portal merken**. Nur bestätigen, wenn die Anmeldung kostenlos war und du die Bedingungen selbst akzeptiert hast. RoadLink speichert Prüfsummen von Formular und Bedingungen; keine Formularwerte, Cookies oder Sitzungsschlüssel. Ohne frischen Internetnachweis wird nichts gespeichert.
+
+**Bekannte Portale automatisch** startet mit **Ein**. Unter **Bekannte Portale** lässt sich die Einstellung je bestätigtem Profil ändern. Die automatische Ausführung der gespeicherten Anmeldung wird noch entwickelt. Der Schalter allein bestätigt keine Bedingungen und schaltet kein Internet frei. Geänderte Bedingungen, Zahlung, SMS, CAPTCHA oder persönliche Angaben erfordern eine manuelle Prüfung. Dynamische Seiten und externe Bedingungsseiten brauchen noch eigene Portal-Adapter.
 
 Bei gestarteter Anmeldung prüft RoadLink die Seite und zeigt den Stand unter **Formularprüfung**. Diese Prüfung meldet niemanden an und bestätigt keine Bedingungen.
 

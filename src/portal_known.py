@@ -161,6 +161,15 @@ class KnownPortals:
 
     def remember(self, observed, proof, now, approved_free=False, current_connection=None):
         snapshot = descriptor(observed)
+        return self.remember_snapshot(snapshot, proof, now, approved_free, current_connection)
+
+    def remember_snapshot(self, snapshot, proof, now, approved_free=False, current_connection=None, check=None):
+        """Save already hashed observation after explicit bound manual success.
+
+        No raw HTML or tokens need survive the login. A live caller supplies
+        check to revalidate ownership after acquiring the store's lock.
+        """
+        snapshot = stored_snapshot(snapshot)
         fingerprint = digest(snapshot)
         if (approved_free is not True or snapshot['manual_reasons']
                 or not isinstance(proof, dict)
@@ -177,6 +186,7 @@ class KnownPortals:
             raise ValueError('Fresh explicit manual success required')
         identifier = profile_id(snapshot)
         with self.mutation() as data:
+            if check is not None:check()
             if identifier not in data['profiles'] and len(data['profiles']) >= 64:
                 raise ValueError('Known portal limit reached')
             old = data['profiles'].get(identifier, {})
@@ -184,6 +194,7 @@ class KnownPortals:
                 'auto_accept': old.get('auto_accept', True), 'last_success': now}
             if len(json.dumps(data, ensure_ascii=False).encode()) > 524288:
                 raise ValueError('Known portal store limit reached')
+            if check is not None:check()
             write_json(self.path, data)
         return identifier
 

@@ -13,6 +13,7 @@ import portal_state
 import portal_pins
 import portal_review
 import portal_completion
+import portal_remember
 from storage import load_json
 
 
@@ -23,6 +24,7 @@ class Manager:
         self.completed=None
         self.api=portal_api.API(service,is_alive,self.busy,itemtype=itemtype)
         self.known_api=portal_known_api.API(service)
+        self.remember_stage=portal_remember.Stage(service,is_alive,store=self.known_api.store,itemtype=itemtype)
 
     def busy(self):
         return bool(self.worker and self.worker.poll() is None) or runtime.busy()
@@ -67,21 +69,29 @@ class Manager:
         if self.worker and self.worker.poll() is not None:self.worker=None
         if not enabled:
             self.completed=None
+            self.remember_stage.clear()
             self.cancel()
             self.api.refresh(None,'STOPPING' if self.busy() else 'OFF')
             self.api.service['/Portal/FormStatus']=''
             return
+        view=self.view()
+        if view and self.form_status(view):
+            self.remember_stage.capture(load_json(runtime.ROOT/'session.json',{}),
+                load_json(runtime.WAN/'portal-review-request.json',{}),
+                load_json(runtime.WAN/'portal-review-result.json',{}),view)
         success=portal_completion.collect(self.owner,self.alive)
         if success:
             self.completed=success
+            self.remember_stage.complete(success)
             self.cancel()
-        view=self.view()
         intent=self.api.take()
         if intent and intent['action']=='stop':
             self.completed=None
+            self.remember_stage.clear()
             self.cancel()
         elif intent and intent['action']=='start':
             self.completed=None
+            self.remember_stage.clear()
             try:
                 if self.busy() or view is None:raise ValueError('Portal unavailable')
                 session=intent['session']
@@ -99,3 +109,5 @@ class Manager:
             status='COMPLETED'
         self.api.refresh(view,status)
         self.api.service['/Portal/FormStatus']=self.form_status(view)
+        self.remember_stage.update()
+        self.known_api.publish()
