@@ -116,7 +116,7 @@ class Session:
             return page
         raise ValueError('Too many portal HTTP redirects')
 
-    def submit(self,plan):
+    def submit(self,plan,continuations=None):
         if (not isinstance(plan,dict) or set(plan)!={'url','method','content_type','body','fingerprint'}
                 or plan['content_type']!='application/x-www-form-urlencoded'
                 or not re.fullmatch('[0-9a-f]{64}',plan['fingerprint'])
@@ -126,9 +126,31 @@ class Session:
         if method=='GET':
             if urlsplit(url).query:raise ValueError('Ambiguous prepared GET action')
             url+=('?' if body else '')+body.decode('ascii');body=b''
+        approved=[] if continuations is None else continuations
+        if not isinstance(approved,list) or len(approved)>3:raise ValueError('Invalid portal continuation policy')
+        def target_key(value):
+            parts=urlsplit(capport.uri(value,legacy_http=True))
+            return portal_form_fetch.origin(value),parts.path or '/'
+        allowed=set()
+        for target in approved:
+            if urlsplit(target).query:raise ValueError('Continuation policy must omit session parameters')
+            allowed.add(target_key(target))
         response=self.exchange(url,method,body)
-        # A redirect is a response to the action, not permission to replay a
-        # POST or accept another agreement. Internet is checked independently.
-        if response['status'] not in (200,204,302,303):raise ValueError('Portal action not accepted')
-        self.check()
-        return {'state':'SUBMITTED'}
+        visited={url};hops=0
+        while True:
+            self.check()
+            status=response['status']
+            if status in (200,204):return {'state':'SUBMITTED'}
+            # 307/308 and ambiguous 301 after POST must never replay the body.
+            if status not in (301,302,303,307,308) or method=='POST' and status not in (302,303):
+                raise ValueError('Portal action not accepted')
+            if not response.get('location'):raise ValueError('Missing portal continuation')
+            if not allowed:return {'state':'SUBMITTED'}
+            target=capport.uri(urljoin(url,response['location']),legacy_http=True)
+            if (target_key(target) not in allowed or target in visited or hops>=3
+                    or urlsplit(url).scheme=='https' and urlsplit(target).scheme!='https'):
+                raise ValueError('Portal continuation not approved')
+            # Only explicit reviewed endpoints, GET only, no further form
+            # processing or agreements. Query/session values stay transient.
+            visited.add(target);url=target;method='GET';hops+=1
+            response=self.exchange(url,'GET')

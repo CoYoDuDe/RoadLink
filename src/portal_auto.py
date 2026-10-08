@@ -67,6 +67,10 @@ def attempt(url,context,radio,store=None):
         plan=portal_forms.prepare(page['html'],page['url'],radio,candidate['review'],page['redirects'],store)
         if plan['fingerprint']!=expected:raise ValueError('Prepared action differs from approval')
         authorize()
-        session.submit(plan)
+        parts=urlsplit(plan['url'])
+        # Generic static adapter knows only these same-origin completion pages.
+        # Other provider paths need their own explicitly reviewed continuation.
+        continuations=[parts.scheme+'://'+parts.netloc+path for path in ('/done','/success')]
+        session.submit(plan,continuations)
         context.check()
         return {'state':'SUBMITTED','fingerprint':expected,'checked_at':time.monotonic()}

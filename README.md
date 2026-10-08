@@ -54,6 +54,8 @@ Nach erfolgreicher manueller Anmeldung prüft RoadLink Internet und DNS über de
 
 **Bekannte Portale automatisch** startet mit **Ein**. Unter **Bekannte Portale** lässt sich die Einstellung je bestätigtem Profil ändern. Bei unterstützten einfachen Formularen ruft RoadLink die Seite frisch ab, vergleicht Formular und Bedingungen und verwendet nur den aktuellen Sitzungsschlüssel. Cookies bleiben vorübergehend im Arbeitsspeicher und gelten nur für denselben Host und Port. Pro WLAN-Verbindung gibt es höchstens einen automatischen Versuch; eine verlorene Antwort löst keinen zweiten Versuch aus. Eine laufende manuelle Anmeldung hat Vorrang.
 
+Nach dem Absenden kann der einfache Adapter begrenzten GET-Weiterleitungen zu `/done` und `/success` beim selben Anbieter folgen. Neue Cookies werden dabei übernommen; der ursprüngliche POST wird nicht wiederholt. Andere Ziele und weitere Formulare brauchen einen passenden Portal-Adapter.
+
 Der Schalter allein bestätigt keine Bedingungen und schaltet kein Internet frei. Auch eine erfolgreiche Portalantwort ersetzt die unabhängige Internetprüfung nicht. Geänderte Bedingungen, Zahlung, SMS, CAPTCHA oder persönliche Angaben erfordern eine manuelle Prüfung. Dynamische Seiten, unbekannte URL-Pfade und externe Bedingungsseiten brauchen noch eigene Portal-Adapter. Der automatische Ablauf ist noch nicht an echten öffentlichen Portalen fertig geprüft.
 
 Bei gestarteter Anmeldung prüft RoadLink die Seite und zeigt den Stand unter **Formularprüfung**. Diese Prüfung meldet niemanden an und bestätigt keine Bedingungen.
