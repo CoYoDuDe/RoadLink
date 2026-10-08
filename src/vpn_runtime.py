@@ -233,11 +233,21 @@ def serve(parent_pid, parent_start):
         values = command(['wg', 'show', INTERFACE, 'latest-handshakes']).stdout.split()
         handshake = int(values[1]) if len(values) == 2 else 0
         fresh = bool(handshake and 0 <= time.time() - handshake < 180)
-        write_json(ROOT / 'status.json', {'state': 'READY' if fresh and dns_ready and tunnel_https else 'CONNECTING',
-                   'dns_ready': bool(fresh and dns_ready), 'internet': bool(fresh and dns_ready and tunnel_https),
+        # A probe of an earlier association must never approve a reconnected
+        # profile, another BSSID, namespace generation or DHCP address. The
+        # next selection cycle recreates the peer and probes the new route.
+        route_current = active != 'wifi' or selected_route == vpn_transport.wifi(
+            load_json(Path('/run/roadlink-wan/status.json'), {}))
+        ready = bool(fresh and dns_ready and tunnel_https and route_current)
+        write_json(ROOT / 'status.json', {'state': 'READY' if ready else 'CONNECTING',
+                   'dns_ready': bool(fresh and dns_ready and route_current), 'internet': ready,
                    'handshake': handshake, 'endpoint': config['endpoint'],
                    'address': config['address'], 'dns': active_dns or '', 'wan': active or '', 'health': health,
                    'mode': mode, 'wifi_profile_id': (selected_route or {}).get('profile_id', '') if active == 'wifi' else '',
+                   'wifi_connection': (selected_route or {}).get('connection') if active == 'wifi' else None,
+                   'wifi_lease': (selected_route or {}).get('lease') if active == 'wifi' else None,
+                   'owner': {'pid':os.getpid(),'start':token(os.getpid())},
+                   'guard':load_json(ROOT/'guard.json',{}),
                    'wifi_penalty_profile': wifi_penalty_profile,
                    'checked_at': last_probe,
                    'penalties': {key: time.monotonic() < expiry for key, expiry in penalties.items()}})

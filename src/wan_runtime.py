@@ -31,6 +31,7 @@ import wan_lease
 import portal_state
 import portal_pins
 import portal_review
+import vpn_status
 from runtime_lock import busy as runtime_locked
 
 ROOT = Path('/run/roadlink-wan')
@@ -464,16 +465,14 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                        'identity': state['identity'], 'driver': state['driver'], 'interface': RADIO,
                        'address': lease.get('address', '') if leased else '', 'internet': False,
                        'connection_id': connection_id if leased else '',
+                       'connection': binding if leased else None,
                        'lease': {key: lease.get(key, '') for key in ('address', 'gateway')} if leased else None,
                        'bridge': bridge, 'bootstrap': bootstrap,
                        'portal_state': (portal_result or {}).get('state', 'CHECKING' if leased and portal and portal.poll() is None else 'UNKNOWN'),
                        'https_healthy': bool(last_health and not health_failures)})
             failed = (supplicant and supplicant.poll() is not None) or (dhcp and dhcp.poll() is not None)
             vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
-            proven = (use_vpn and vpn_state.get('state') == 'READY'
-                    and vpn_state.get('internet') and vpn_state.get('dns_ready')
-                    and vpn_state.get('wifi_profile_id') == profile['id']
-                    and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {})))
+            proven = bool(use_vpn and leased and vpn_status.current_wifi(binding,lease,alive))
             if not use_vpn and leased:
                 import ipaddress
                 ap_address = load_json(Path('/run/roadlink-ap/status.json'), {}).get('address')

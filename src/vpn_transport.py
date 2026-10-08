@@ -2,6 +2,7 @@
 import ipaddress
 import json
 import re
+import copy
 from pathlib import Path
 from storage import load_json, write_json
 from wan_bridge import HOST, MARK
@@ -41,9 +42,20 @@ def wifi(state):
             or not device.exists() or (device / 'ifalias').read_text().strip() != 'roadlink-wan-bridge-owned'):
         return None
     bridge = state['bridge']
+    import wan_lease
+    try:
+        binding=state['connection']
+        if (wan_lease.connection(binding['connection_id'],binding['profile_id'],binding['bssid'],binding)!=binding
+                or binding['connection_id']!=state.get('connection_id')
+                or binding['profile_id']!=state.get('profile_id')
+                or set(state['lease'])!={'address','gateway'}):return None
+        address=ipaddress.IPv4Interface(state['lease']['address'])
+        gateway=ipaddress.IPv4Address(state['lease']['gateway'])
+        if gateway not in address.network or gateway==address.ip:return None
+    except (KeyError,TypeError,ValueError):return None
     return {'dev': HOST, 'source': str(ipaddress.IPv4Address(bridge['host'])),
             'gateway': str(ipaddress.IPv4Address(bridge['peer'])),
-            'profile_id': state.get('profile_id', '')}
+            'profile_id': binding['profile_id'],'connection':copy.deepcopy(binding),'lease':dict(state['lease'])}
 
 
 def select(config, route, command):
