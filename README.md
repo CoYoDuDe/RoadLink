@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.22 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.23 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -41,6 +41,8 @@ Unter **Fahrzeug-WLAN → Fahrzeug-WLAN über** das integrierte WLAN oder den US
 - Automatische Umschaltung bei Ausfall mit verzögerter Rückkehr, damit die Verbindung nicht ständig wechselt.
 
 Für die Starlink-App im Fahrzeug-WLAN unter **Internet und Umschaltung → Starlink-App ueber LAN** den lokalen Zugang einschalten. Starlink muss am Ethernet-Anschluss des Pi hängen. Die Freigabe erlaubt nur die benötigten Verbindungen zur Antenne und zum eigenen Starlink-Router; andere private Netze bleiben gesperrt. Bei Neuinstallation ist der Schalter ausgeschaltet.
+
+Die Freigabe umfasst die lokalen API- und App-Ports beider Starlink-Geräte. Ob die App alle Router-Einstellungen über ein vorgeschaltetes Fahrzeug-WLAN anzeigt, hängt auch von ihrer Geräteerkennung ab; die vollständige Router-Anzeige ist noch nicht bestätigt.
 
 **Standardmäßig erhält das Fahrzeug-WLAN Internet über den geprüften VPN-Tunnel.** Ein direkter Betrieb muss ausdrücklich gewählt werden. Eine WLAN-Verbindung oder IP-Adresse allein reicht nicht. Ethernet und SSH für den Gerätezugang bleiben erhalten. WLAN-Betreiber können weiterhin einen verbundenen Teilnehmer erkennen; RoadLink macht ihn nicht unsichtbar.
 

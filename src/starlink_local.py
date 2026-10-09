@@ -7,7 +7,8 @@ from storage import load_json, write_json, atomic_write
 TABLE = '51922'
 PRIORITY = '21809'
 TAG = 'roadlink-starlink-local-owned'
-TARGETS = {'192.168.100.1': '80,9200', '192.168.1.1': '80,9000'}
+TARGETS = {'192.168.100.1': '80,9200,9201', '192.168.1.1': '80,9000,9001'}
+LEGACY_TARGETS = {'192.168.100.1': '80,9200', '192.168.1.1': '80,9000'}
 AP = 'aproadlink'
 ETH = 'eth0'
 
@@ -48,11 +49,12 @@ def discover(subnet, command):
     return validate({'subnet': subnet, 'paths': paths})
 
 
-def rules(config):
+def rules(config, targets=None):
     config = validate(config)
+    targets = TARGETS if targets is None else targets
     tag = ['-m', 'comment', '--comment', TAG]
     for target in config['paths']:
-        ports = TARGETS[target]
+        ports = targets[target]
         yield ['filter', 'FORWARD', '-i', AP, '-o', ETH, '-s', config['subnet'], '-d', target+'/32',
                '-p', 'tcp', '-m', 'multiport', '--dports', ports, *tag, '-j', 'ACCEPT']
         yield ['filter', 'FORWARD', '-i', ETH, '-o', AP, '-s', target+'/32', '-d', config['subnet'],
@@ -117,7 +119,9 @@ def selectors(command):
 
 
 def revoke(config, command):
-    for row in reversed(list(rules(config))):
+    # Recover the exact previous release's rules too. Unknown rules remain
+    # untouched and are rejected by the existing ownership checks.
+    for row in reversed(list(rules(config)) + list(rules(config, LEGACY_TARGETS))):
         while command(rule_command('-C',row),check=False).returncode==0:
             command(rule_command('-D',row))
 
@@ -168,7 +172,14 @@ def refresh(root, command):
     desired = discover(old['subnet'],command)
     if desired==old:
         if any(command(rule_command('-C',row),check=False).returncode for row in rules(old)):
-            raise RuntimeError('Starlink firewall changed')
+            legacy = list(rules(old, LEGACY_TARGETS))
+            if (any(command(rule_command('-C',row),check=False).returncode for row in legacy)
+                    or any(command(rule_command('-C',row),check=False).returncode==0 for row in rules(old))):
+                raise RuntimeError('Starlink firewall changed')
+            # Journal format is unchanged. Withdraw only the complete known
+            # legacy rules before installing the additional app endpoints.
+            revoke(old,command)
+            for row in rules(old):command(rule_command('-I',row))
         ensure_head(root,old,command)
         return
     # Withdraw permissions first; keep both destination selectors and their
