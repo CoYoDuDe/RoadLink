@@ -7,7 +7,10 @@ MbPage {
     model: VisibleItemModel {
         MbItemText { text: qsTr("VPN erforderlich") }
         MbItemText { text: qsTr("Prioritaet: ") + root.profile.priority }
-        MbItemText { text: root.profile.quality_summary || qsTr("Noch keine aktuelle Verbindungsprüfung") }
+        MbItemText {
+            text: root.profile.quality_summary || qsTr("Noch keine aktuelle Verbindungsprüfung")
+            wrapMode: Text.WordWrap
+        }
         MbItemText { text: root.profile.last_resort ? qsTr("Nur als letzte Reserve") : qsTr("Normales WLAN-Profil") }
         MbItemText { text: root.profile.autoconnect ? qsTr("Automatische Verbindung vorgesehen") : qsTr("Automatische Verbindung aus") }
         MbSubMenu { description: qsTr("Bearbeiten"); subpage: Component { PageRoadLinkWifiAdd { profileId: root.profile.id || "" } } }

@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.25 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.26 – noch keine fertige Endversion.**
 
 ## Installation
 
