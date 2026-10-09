@@ -2,10 +2,13 @@
 import hashlib
 import secrets
 import os
+import json
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from storage import load_json, write_json
 from privacy import profile_mac
+import wifi_quality
 
 
 class Profiles:
@@ -62,6 +65,8 @@ class Profiles:
         value = {'id': identifier, 'ssid': ssid, 'security': security, 'password': password if security == 'psk' else '',
                  'priority': priority, 'autoconnect': autoconnect, 'last_resort': last_resort, 'vpn_required': True,
                  'mac': profile_mac(bytes.fromhex(self.data['seed']), identifier)}
+        if existing.get('ssid') == ssid and existing.get('security') == security and 'quality' in existing:
+            value['quality'] = existing['quality']
         candidate = dict(self.data['profiles'])
         candidate[identifier] = value
         updated = dict(self.data, profiles=candidate)
@@ -70,8 +75,27 @@ class Profiles:
         return identifier
 
     def metadata(self):
-        return [{k: v for k, v in p.items() if k != 'password'}
+        return [dict({k: v for k, v in p.items() if k not in ('password', 'quality')},
+                     quality_summary=wifi_quality.description(p, time.time()))
                 for p in sorted(self.data['profiles'].values(), key=lambda p: (p.get('last_resort', False), -p['priority'], p['ssid']))]
+
+    def connection_revision(self):
+        if not self.path.exists():
+            return None
+        value = dict(self.data, profiles={key: {k: v for k, v in profile.items() if k != 'quality'}
+                                         for key, profile in self.data['profiles'].items()})
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+    def record_quality(self, expected, success, latency, now):
+        with self.mutation():
+            profile = self.data['profiles'].get(expected['id'])
+            if not profile or any(profile.get(k) != expected.get(k) for k in ('ssid', 'security')):
+                return False  # Deleted/renamed profiles never reappear from telemetry.
+            profile = dict(profile, quality=wifi_quality.update(profile.get('quality'), success, latency, now))
+            updated = dict(self.data, profiles=dict(self.data['profiles'], **{expected['id']: profile}))
+            write_json(self.path, updated)
+            self.data = updated
+            return True
 
     def remember_open(self, ssid):
         with self.mutation():

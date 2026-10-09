@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.24 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.25 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -33,6 +33,7 @@ Unter **Fahrzeug-WLAN → Fahrzeug-WLAN über** das integrierte WLAN oder den US
 - Unter **Internet und Umschaltung → VPN-Anbieter** zwischen DNSmith und eigenem WireGuard-Server wechseln. Beide Konfigurationen bleiben lokal gespeichert. Für den eigenen Server den angezeigten Geräte-Public-Key dort registrieren und Serveradresse, Port, Server-Public-Key, Clientadresse und VPN-DNS eintragen.
 - Externe WLANs suchen, hinzufügen, bearbeiten und entfernen; WPA2 oder offen.
 - Gespeicherte, freigegebene WLANs automatisch verbinden; Priorität selbst festlegen.
+- Bei gleicher Priorität bewährte WLANs bevorzugen. RoadLink merkt sich erfolgreiche und fehlgeschlagene Verbindungsversuche sowie die Antwortzeit seiner HTTPS-Prüfung. Ein Erfolg zählt erst nach 30 Sekunden bestätigtem Internet und DNS; bei eingeschaltetem VPN muss auch der Tunnel funktionieren. Unter dem WLAN-Profil steht die Bewertung. Sie ist keine Messung der Downloadgeschwindigkeit. Nach 30 Tagen ohne neue Prüfung wird die Bewertung nicht mehr zur Auswahl verwendet. Manuelle Prioritäten und die Kennzeichnung als letzte Reserve haben Vorrang.
 - Optional unbekannte offene WLANs automatisch suchen und prüfen. Der Schalter startet ausgeschaltet. Erst nach bestätigtem Internet und DNS über dieses WLAN wird es gespeichert; bei eingeschaltetem VPN muss auch der Tunnel funktionieren. Fehlgeschlagene Netze werden mit Wartezeit erneut geprüft.
 - Profile als letzte Reserve markieren. Sie bleiben bei funktionierendem Ethernet getrennt; normale bekannte oder gefundene offene Netze erhalten Vorrang. Innerhalb der Gruppe entscheidet die Priorität. „Nur WLAN“ erlaubt die Reserve auch bei gesundem Ethernet.
 - Optionalen Gerätenamen für externe WLANs einstellen; leer sendet keinen DHCP-Namen. Der Betreiber kann eine eigene Bezeichnung anzeigen. Der Fahrzeug-WLAN-Name ist unabhängig davon.
@@ -99,7 +100,7 @@ Die Trennung von fremden und privaten Netzen, der ausgewählte DNS und der VPN-S
 
 ## Noch offen
 
-WLAN-Anmeldung und automatische Zustimmung sind noch in Entwicklung und nicht mit echten öffentlichen Portalen fertig geprüft. Ebenfalls offen: Geschwindigkeitsmessung und gelerntes Ranking, echte Bündelung/Beschleunigung, Handy-Import, Clientverwaltung sowie Weboberfläche/GUI v2. Eine WLAN-Verbindung oder Portal-Freigabe allein gilt nicht als funktionierender Internet-/VPN-Zugang. HTTPS-basierte Fremd-DNS-Dienste werden noch nicht vollständig gefiltert. Die aktuelle Oberfläche unterstützt das klassische Venus-GUI und die Remote Console.
+WLAN-Anmeldung und automatische Zustimmung sind noch in Entwicklung und nicht mit echten öffentlichen Portalen fertig geprüft. Ebenfalls offen: Messung der Downloadgeschwindigkeit, echte Bündelung/Beschleunigung, Handy-Import, Clientverwaltung sowie Weboberfläche/GUI v2. Eine WLAN-Verbindung oder Portal-Freigabe allein gilt nicht als funktionierender Internet-/VPN-Zugang. HTTPS-basierte Fremd-DNS-Dienste werden noch nicht vollständig gefiltert. Die aktuelle Oberfläche unterstützt das klassische Venus-GUI und die Remote Console.
 
 ## Updates und Entfernen
 

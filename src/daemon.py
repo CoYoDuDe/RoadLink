@@ -25,6 +25,7 @@ from secret_item import SecretItem
 from ap_runtime import ROOT as AP_ROOT, SECRET as AP_SECRET, token, alive
 from wifi import networks
 from profile_api import install as install_profile_api
+from profiles import Profiles
 from scan_api import install as install_scan_api
 from vpn_config import read as vpn_config
 from vpn_runtime import ROOT as VPN_ROOT
@@ -216,13 +217,11 @@ def main():
             vpn_requested = bool(wanted == 'vpn' and configuration and configuration['enabled']
                 and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists())
             vpn_current = repr(configuration) if vpn_requested else None
-            profiles_path = Path('/data/setupOptions/RoadLink/wifi-profiles.json')
             wan_requested = bool(settings['wan_enabled'] and wanted != 'off')
             hostname = client_name(str(settings['client_name']))
             service['/WifiWan/ClientName'] = hostname
             wan_current = (repr(configuration) if use_vpn else repr(direct_dns(dns_settings())),
-                           use_vpn, profiles_path.stat().st_mtime_ns
-                           if profiles_path.exists() else 0, hostname, bool(settings['auto_open']),
+                           use_vpn, Profiles().connection_revision(), hostname, bool(settings['auto_open']),
                            use_vpn and bool(settings['auto_enroll']) and enrollment_allowed()) if wan_requested else None
             if wan_worker and wan_worker.poll() is not None:
                 wan_worker = None

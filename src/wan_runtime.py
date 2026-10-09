@@ -13,6 +13,7 @@ from ap_runtime import command, token, alive
 from hardware import inspect_interfaces, capabilities
 import radio_roles
 from profiles import Profiles
+from wifi_quality import Recorder
 from privacy import profile_mac
 from wan_scan import Scanner
 from open_wifi import Candidates
@@ -332,6 +333,8 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
         last_health, health_failures = 0, 0
         association, connection_id = None, ''
         reserve_gate = Gate(time.monotonic())
+        quality = Recorder()
+        latency_ms = None
         while not (ROOT / 'stop').exists():
             if not alive({'pid': parent_pid, 'start': parent_start}): break
             if transport_settings()['vpn_required'] != use_vpn or radio_roles.read() != role_settings: break
@@ -404,6 +407,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                                     '-c', str(ROOT / 'station.conf')])
                 started = time.monotonic()
                 last_health, health_failures = 0, 0
+                latency_ms = None
             response = inside(['wpa_cli', '-p', str(ROOT / 'control'), '-i', RADIO, 'status'], check=False)
             status = dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
             connected = status.get('wpa_state') == 'COMPLETED'
@@ -461,9 +465,12 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                 pulse()
                 try:
                     check = inside([sys.executable, str(Path(__file__).with_name('wan_health.py')), RADIO], check=False)
-                    healthy = bool(json.loads(check.stdout).get('healthy'))
+                    health = json.loads(check.stdout)
+                    healthy = check.returncode == 0 and health.get('healthy') is True
+                    latency_ms = health.get('latency_ms') if healthy else None
                 except (ValueError, subprocess.TimeoutExpired):
                     healthy = False
+                    latency_ms = None
                 pulse()
                 health_failures = 0 if healthy else health_failures + 1
                 last_health = time.monotonic()
@@ -497,7 +504,15 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
             captive_wait = portal_wait.allow(binding if leased else None, portal_result, time.monotonic(), proven=proven)
             first_probe = (leased and portal and portal.poll() is None
                            and time.monotonic()-portal_started < 22 and not portal_result)
-            if failed or ((health_failures >= 2 or tunnel_failed) and not captive_wait and not first_probe) or (supplicant and not leased and time.monotonic() - started > 45):
+            rejected = bool(failed or ((health_failures >= 2 or tunnel_failed) and not captive_wait and not first_probe)
+                            or (supplicant and not leased and time.monotonic() - started > 45))
+            # An isolated VPN-server penalty alone is not a WLAN-quality failure.
+            quality_failed = rejected and bool(failed or health_failures >= 2 or not leased)
+            if quality.consider(Profiles(), profile, started, proven,
+                                bool(last_health and not health_failures), latency_ms,
+                                quality_failed, time.monotonic(), time.time()):
+                candidates.profiles = list(Profiles().data['profiles'].values())
+            if rejected:
                 stop_children(); supplicant = dhcp = None
                 candidates.reject(profile['id'], time.monotonic())
                 profile = None

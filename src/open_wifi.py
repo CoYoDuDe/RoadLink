@@ -1,6 +1,7 @@
 """Bounded candidate selection; discovery never saves or trusts a network."""
 import hashlib
 from privacy import profile_mac
+from wifi_quality import ranking
 
 
 class Candidates:
@@ -17,9 +18,9 @@ class Candidates:
 
     def select(self, scan, wall_time, now, allow_last_resort=True):
         choices = sorted((p for p in self.profiles if p['autoconnect'] and not p.get('last_resort', False)),
-                         key=lambda p: (-p['priority'], p['ssid']))
+                         key=lambda p: ranking(p, wall_time))
         fallback = sorted((p for p in self.profiles if p['autoconnect'] and p.get('last_resort', False)),
-                          key=lambda p: (-p['priority'], p['ssid']))
+                          key=lambda p: ranking(p, wall_time))
         fresh = 0 <= wall_time - scan.get('timestamp', 0) <= 180
         if self.enabled and scan.get('state') == 'COMPLETE' and 0 <= wall_time - scan.get('timestamp', 0) <= 180:
             # Disabled saved networks and encrypted networks may not reappear
