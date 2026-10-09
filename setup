@@ -34,6 +34,12 @@ backupActiveFile ()
 if [ "$scriptAction" = 'NONE' ]; then
     standardActionPrompt
 fi
+if [ "$scriptAction" = 'INSTALL' ] && ! $installFailed; then
+    if ! python3 "$scriptDir/src/dependencies.py" --install; then
+        logMessage 'RoadLink: Netzwerkpakete fehlen oder konnten nicht installiert werden; bisherige RoadLink-Dienste bleiben erhalten'
+        exit 245
+    fi
+fi
 if [ "$scriptAction" = 'INSTALL' ] || [ "$scriptAction" = 'UNINSTALL' ]; then
     if ! python3 "$scriptDir/src/qml_backups.py"; then
         logMessage 'RoadLink GUI backup repair failed; leaving installed files intact'
