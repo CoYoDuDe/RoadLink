@@ -12,9 +12,14 @@ import subprocess
 import sys
 from urllib.parse import urlsplit
 
-TOOLS = {'hostapd': 'hostapd', 'dnsmasq': 'dnsmasq', 'wg': 'wireguard-tools',
+TOOLS = {'hostapd': 'hostapd', 'hostapd_cli': 'hostapd',
+         'dnsmasq': 'dnsmasq', 'wg': 'wireguard-tools',
          'ip': 'iproute2', 'iw': 'iw', 'iptables': 'iptables',
-         'ip6tables': 'iptables', 'wpa_supplicant': 'wpa-supplicant'}
+         'ip6tables': 'iptables', 'iptables-save': 'iptables',
+         'ip6tables-save': 'iptables', 'iptables-restore': 'iptables',
+         'wpa_supplicant': 'wpa-supplicant', 'wpa_cli': 'wpa-supplicant-cli',
+         'udhcpc': 'busybox-udhcpc', 'sysctl': 'procps-sysctl',
+         'openssl': 'openssl-bin'}
 
 
 def missing():
@@ -22,7 +27,10 @@ def missing():
     if not Path('/sys/module/wireguard').exists():
         modprobe = shutil.which('modprobe')
         if not modprobe:
-            raise RuntimeError('Die WireGuard-Kernelprüfung benötigt modprobe.')
+            # Install the module tool first; only then can the matching kernel
+            # module be checked without guessing which package is needed.
+            packages.add('kmod')
+            return sorted(packages)
         result = subprocess.run([modprobe, '-n', 'wireguard'], capture_output=True,
                                 timeout=10, check=False)
         if result.returncode:
@@ -70,13 +78,22 @@ def ensure(install=False):
     official_feeds()
     print('RoadLink: Installiere fehlende Netzwerkpakete: ' + ', '.join(packages), flush=True)
     # opkg retains its native locking, dependency and checksum checks.
-    for command in ([opkg, 'update'], [opkg, '--no-install-recommends', 'install', *packages]):
-        result = subprocess.run(command, timeout=180, check=False)
+    result = subprocess.run([opkg, 'update'], timeout=180, check=False)
+    if result.returncode:
+        raise RuntimeError('Paketinstallation fehlgeschlagen; Internet und Venus-Paketquellen prüfen. RoadLink wurde noch nicht umgestellt.')
+    # A second pass is needed only when modprobe itself was missing. Bound the
+    # retries and never repeat a failed package set indefinitely.
+    for attempt in range(2):
+        result = subprocess.run([opkg, '--no-install-recommends', 'install', *packages],
+                                timeout=180, check=False)
         if result.returncode:
             raise RuntimeError('Paketinstallation fehlgeschlagen; Internet und Venus-Paketquellen prüfen. RoadLink wurde noch nicht umgestellt.')
-    remaining = missing()
-    if remaining:
-        raise RuntimeError('Netzwerkpakete weiterhin unvollständig: ' + ', '.join(remaining))
+        remaining = missing()
+        if not remaining:
+            break
+        if 'kmod' not in packages or 'kmod' in remaining or attempt == 1:
+            raise RuntimeError('Netzwerkpakete weiterhin unvollständig: ' + ', '.join(remaining))
+        packages = remaining
     print('RoadLink: Netzwerkpakete erfolgreich geprüft.', flush=True)
 
 

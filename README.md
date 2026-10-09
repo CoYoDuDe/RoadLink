@@ -1,7 +1,7 @@
 # RoadLink
 
 Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
-**Entwicklungsstand v0.26 – noch keine fertige Endversion.**
+**Entwicklungsstand v0.27 – noch keine fertige Endversion.**
 
 ## Installation
 
@@ -11,7 +11,7 @@ Internet und eigenes Fahrzeug-WLAN für Venus OS auf dem Raspberry Pi.
 - GitHub-Benutzer: `CoYoDuDe`
 - Branch: `main`
 
-Danach **Einstellungen → RoadLink** öffnen. Fehlende Netzwerkpakete wie `hostapd`, `dnsmasq` und WireGuard installiert SetupHelper automatisch aus den offiziellen Venus-Paketquellen. Dafür muss der Pi Internet haben. Bereits vorhandene Pakete werden nicht erneut installiert. Bei zusätzlichen oder unsicheren Paketquellen ist eine manuelle Installation nötig. Bei einer Deinstallation bleiben gemeinsam verwendete Netzwerkpakete erhalten.
+Danach **Einstellungen → RoadLink** öffnen. SetupHelper prüft die benötigten Netzwerkprogramme einschließlich ihrer WLAN-, DHCP- und Firewall-Hilfsprogramme und installiert fehlende Pakete automatisch aus den offiziellen Venus-Paketquellen. Dafür muss der Pi Internet haben. Scheitert die Paketprüfung oder Installation, werden laufende RoadLink-Dienste noch nicht umgestellt. Bereits vorhandene Programme werden weiterverwendet. Bei zusätzlichen oder unsicheren Paketquellen ist eine manuelle Installation nötig. Bei einer Deinstallation bleiben gemeinsam verwendete Netzwerkpakete erhalten.
 
 Die Startseite zeigt den Internetpfad, das verbundene WLAN und den Status. Unter **Fahrzeug-WLAN**, **Externe WLANs**, **Internet und Umschaltung** und **Diagnose** liegen die jeweiligen Einstellungen.
 
