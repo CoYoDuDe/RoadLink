@@ -4,7 +4,7 @@ import ipaddress
 import re
 
 
-def hostapd(interface, ssid, passphrase, channel=6):
+def hostapd(interface, ssid, passphrase, channel=6, radio=None):
     if not re.fullmatch(r'ap[a-zA-Z0-9_]{1,12}', interface):
         raise ValueError('AP interface must be excluded from ConnMan ownership')
     if not isinstance(ssid, str) or not 1 <= len(ssid.encode('utf-8')) <= 32:
@@ -18,9 +18,13 @@ def hostapd(interface, ssid, passphrase, channel=6):
     # Hex SSID avoids newline/config injection; derived PSK avoids plaintext storage.
     # A PSK is still a credential and the resulting file must remain mode 0600.
     psk = hashlib.pbkdf2_hmac('sha1', passphrase.encode('ascii'), ssid.encode('utf-8'), 4096, 32).hex()
-    return ('interface={}\ndriver=nl80211\nssid2={}\nhw_mode=g\nchannel={}\n'
+    if radio is None:
+        radio = 'hw_mode=g\nchannel={}\n'.format(channel)
+    elif not isinstance(radio, str) or not re.fullmatch(r'(?:[a-z0-9_]+=[A-Za-z0-9_+\-\[\]]*\n)+', radio):
+        raise ValueError('Invalid AP radio directives')
+    return ('interface={}\ndriver=nl80211\nssid2={}\n{}'
             'auth_algs=1\nwpa=2\nwpa_key_mgmt=WPA-PSK\nrsn_pairwise=CCMP\n'
-            'wpa_psk={}\nap_isolate=1\n').format(interface, ssid.encode().hex(), channel, psk)
+            'wpa_psk={}\nap_isolate=1\n').format(interface, ssid.encode().hex(), radio, psk)
 
 
 def choose_subnet(occupied, preferred='172.27.88.0/24'):

@@ -3,6 +3,7 @@
 import fcntl
 import ipaddress
 import json
+import re
 import os
 from pathlib import Path
 import signal
@@ -229,8 +230,19 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
         ROOT.mkdir(mode=0o700)
     write_json(ROOT / 'result.json', {'cleaned': True, 'errors': []})
     secret = load_json(SECRET, {})
-    config = hostapd(INTERFACE, ssid, secret.get('password', ''))
     dev = radio_roles.resolve(inspect_interfaces(), 'vehicle_ap', role_settings)
+    import ap_tuning
+    radio_settings = ap_tuning.read()
+    command(['iw', 'reg', 'set', radio_settings['country']], check=False)
+    time.sleep(0.5)  # let cfg80211 apply the regulatory domain to channel flags
+    phy_info = command(['iw', 'dev', dev['interface'], 'info']).stdout
+    phy_match = re.search(r'^\s*wiphy (\d+)\s*$', phy_info, re.M)
+    if not phy_match:
+        raise RuntimeError('Selected AP radio has no wiphy')
+    radio_detail = command(['iw', 'phy', 'phy' + phy_match.group(1), 'info']).stdout
+    radio_directives, tuning = ap_tuning.plan(radio_detail, radio_settings,
+                                              ap_tuning.failed_before(radio_settings))
+    config = hostapd(INTERFACE, ssid, secret.get('password', ''), radio=radio_directives)
     radio_state = ap_radio.plan(ROOT, dev, capabilities(dev['interface']), command)
     if 'Connected to' in command(['iw', 'dev', dev['interface'], 'link']).stdout:
         raise RuntimeError('Internal radio is in use')
@@ -277,6 +289,9 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
             '/run/roadlink/ap.leases', str(ROOT / 'leases'))
         atomic_write(ROOT / 'dnsmasq.conf', dhcp.encode())
         command(['dnsmasq', '--test', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
+    write_json(ROOT / 'tuning.json', tuning)
+    if tuning['band'] == '5':
+        ap_tuning.mark_pending(radio_settings)
     ap = launch('hostapd', ['hostapd', str(ROOT / 'hostapd.conf')])
     dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground',
                                    '--pid-file=' + str(ROOT / 'dnsmasq.pid'),
@@ -299,6 +314,8 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
             atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
             response = command(['hostapd_cli', '-p', str(ROOT / 'control'), '-i', INTERFACE, 'status'], check=False)
             ready = 'state=ENABLED' in response.stdout.splitlines()
+            if ready and tuning['band'] == '5':
+                ap_tuning.clear_pending()
             if not ready and time.monotonic() > startup_deadline:
                 (ROOT / 'stop').touch()
             vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
