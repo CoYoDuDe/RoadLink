@@ -245,11 +245,16 @@ def serve(parent_pid, parent_start):
                 raise RuntimeError('Unexpected VPN runtime entry')
     else:
         ROOT.mkdir(mode=0o700)
+    # Nothing is owned yet: keep a clean receipt so an aborted start (e.g. a
+    # timed-out read while the kernel network lock is blocked) never leaves an
+    # empty runtime that blocks every later handover.
+    write_json(ROOT / 'result.json', {'cleaned': True, 'errors': []})
     existing_rules = command(['ip', 'rule', 'show']).stdout
     existing_routes = command(['ip', 'route', 'show', 'table', TABLE], check=False).stdout
     if PRIORITY + ':' in existing_rules or existing_routes.strip():
         write_json(ROOT / 'result.json', {'cleaned': True, 'errors': []})
         raise RuntimeError('VPN routing table or priority already in use')
+    (ROOT / 'result.json').unlink()  # ownership starts with the state journal
     write_json(ROOT / 'state.json', {'config': config})
     write_json(ROOT / 'controller.json', {'pid': os.getpid(), 'start': token(os.getpid())})
     write_json(ROOT / 'status.json', {'state': 'STARTING', 'dns_ready': False, 'internet': False})

@@ -19,6 +19,14 @@ def command(argv):
     return result.stdout if result.returncode == 0 else ''
 
 
+def _quarantined(identity):
+    try:
+        import radio_health
+        return radio_health.quarantined(identity)
+    except Exception:
+        return False
+
+
 def inspect_interfaces(sys_class_net='/sys/class/net'):
     devices = []
     for link in sorted(Path(sys_class_net).glob('*')):
@@ -46,7 +54,9 @@ def inspect_interfaces(sys_class_net='/sys/class/net'):
             identity = 'usb:{}:{}:{}'.format(vendor, product, serial or usb.name)
         else:
             identity = 'platform:' + str(device)
-        if wireless and usb:
+        if wireless and usb and _quarantined(identity):
+            role = 'quarantined'  # wedged driver: excluded until re-plugged (radio_health)
+        elif wireless and usb:
             role = 'wifi_wan_candidate'
         elif wireless and driver == 'brcmfmac':
             role = 'vehicle_ap_candidate'

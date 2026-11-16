@@ -1,5 +1,6 @@
 """Source-scoped AP routing; a missing WireGuard link never selects main."""
 import ipaddress
+import subprocess
 import json
 from pathlib import Path
 from storage import load_json, write_json
@@ -180,6 +181,8 @@ def cleanup(root, command):
             command(['ip', '-4', 'rule', 'del', 'priority', PRIORITY, 'from', 'all',
                      'iif', AP, 'lookup', TABLE], check=False)
         if policy_entries(command, allow_detached=True): raise RuntimeError('AP policy cleanup incomplete')
+    except subprocess.TimeoutExpired:
+        raise  # retried by cleanup_with_retry
     except Exception as exc:
         errors.append(str(exc))
     try:
@@ -193,6 +196,8 @@ def cleanup(root, command):
                 if entry.get('dev'): args += ['dev', entry['dev']]
                 command(args, check=False)
             if route_entries(command): raise RuntimeError('AP route cleanup incomplete')
+    except subprocess.TimeoutExpired:
+        raise  # retried by cleanup_with_retry
     except Exception as exc:
         errors.append(str(exc))
     if not errors and state['forward_before'] == '0':

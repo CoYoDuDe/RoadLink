@@ -125,6 +125,7 @@ def main():
     install_transport_api(service)
     install_radio_api(service)
     ap_radio_api.install(service)
+    service.add_path('/Radio/Health', '')
     import ap_clients_api
     ap_clients = ap_clients_api.Clients(service)
     from firewall_api import API as FirewallAPI
@@ -176,6 +177,8 @@ def main():
     barrier = Barrier(stop_transport, transport_busy, lambda: transport_clear(command))
     import ap_dual
     dual = ap_dual.Decision()
+    import radio_health
+    radio_monitor = radio_health.Monitor()
 
     def refresh():
         nonlocal worker, signature, failed, vpn_worker, vpn_signature, vpn_retry_at, ap_retry_at
@@ -190,7 +193,10 @@ def main():
                 role_config = radio_roles.read()
                 # Dual-band ownership moves the internal radio between WAN and AP;
                 # it therefore uses the same fully drained handover as a role change.
-                radio_key = (radio_roles.generation(role_config),
+                if radio_monitor.scan():
+                    logging.warning('USB radio quarantined after repeated driver stop failures')
+                service['/Radio/Health'] = radio_monitor.text()
+                radio_key = (radio_roles.generation(role_config), radio_monitor.generation(),
                              dual.update(load_json(VPN_ROOT / 'status.json', {}),
                                          transport_settings()['vpn_required']))
                 # Policy edits use the same fully drained transport handover.

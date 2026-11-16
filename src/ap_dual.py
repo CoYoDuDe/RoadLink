@@ -47,7 +47,11 @@ class Decision:
     def __init__(self, clock=time.monotonic, read=ap_tuning.read,
                  failed=lambda settings: ap_tuning.failed_before(settings, ignore_running=True),
                  radios=radio_count):
-        self.clock, self.read, self.failed, self.radios = clock, read, failed, radios
+        self.clock, self.read, self.failed = clock, read, failed
+        if radios is radio_count:
+            import radio_health
+            radios = lambda: radio_count() - len(radio_health.active())
+        self.radios = radios
         self.active = False
         self.ok_since = self.bad_since = None
         self.radio_cache = (None, -1e9)

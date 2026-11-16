@@ -1,5 +1,6 @@
 """Opt-in local Starlink access, restricted to the physical Ethernet port."""
 import ipaddress
+import subprocess
 import json
 import shlex
 from storage import load_json, write_json, atomic_write
@@ -232,5 +233,7 @@ def cleanup(root, command):
         (root/'starlink-local.json').unlink()
         (root/'starlink-local.restore').unlink(missing_ok=True)
         return []
+    except subprocess.TimeoutExpired:
+        raise  # a blocked kernel command is retried by cleanup_with_retry, not a permanent failure
     except Exception:
         return ['Lokaler Starlink-Zugang konnte nicht vollstaendig bereinigt werden']

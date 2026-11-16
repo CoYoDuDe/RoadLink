@@ -46,10 +46,21 @@ def resolve(devices, role, value):
         raise ValueError('Unknown radio role')
     usb = (role == 'vehicle_ap') == (value['vehicle_ap'] == 'usb')
     category = 'wifi_wan_candidate' if usb else 'vehicle_ap_candidate'
-    candidates = [device for device in devices if device.get('wireless') is True
-                  and device.get('suggested_role') == category]
-    if usb and value['usb_identity']:
-        candidates = [device for device in candidates if device['identity'] == value['usb_identity']]
+    def pick(category, identity=''):
+        found = [device for device in devices if device.get('wireless') is True
+                 and device.get('suggested_role') == category]
+        if identity:
+            found = [device for device in found if device['identity'] == identity]
+        return found
+    usb_radios = pick('wifi_wan_candidate', value['usb_identity'])
+    if role == 'vehicle_ap' and usb and not usb_radios:
+        # USB radio absent or quarantined: the vehicle WLAN falls back to the internal radio.
+        candidates = pick('vehicle_ap_candidate')
+    elif role == 'wifi_wan' and not usb and not usb_radios:
+        # The internal radio already serves the vehicle WLAN in that fallback.
+        candidates = []
+    else:
+        candidates = usb_radios if usb else pick(category)
     if len(candidates) != 1:
         raise ValueError('Selected radio is absent or ambiguous')
     return candidates[0]
