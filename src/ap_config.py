@@ -4,7 +4,7 @@ import ipaddress
 import re
 
 
-def hostapd(interface, ssid, passphrase, channel=6, radio=None):
+def hostapd(interface, ssid, passphrase, channel=6, radio=None, security='wpa2'):
     if not re.fullmatch(r'ap[a-zA-Z0-9_]{1,12}', interface):
         raise ValueError('AP interface must be excluded from ConnMan ownership')
     if not isinstance(ssid, str) or not 1 <= len(ssid.encode('utf-8')) <= 32:
@@ -22,9 +22,20 @@ def hostapd(interface, ssid, passphrase, channel=6, radio=None):
         radio = 'hw_mode=g\nchannel={}\n'.format(channel)
     elif not isinstance(radio, str) or not re.fullmatch(r'(?:[a-z0-9_]+=[A-Za-z0-9_+\-\[\]]*\n)+', radio):
         raise ValueError('Invalid AP radio directives')
+    if security not in ('wpa2', 'wpa2_wpa3', 'wpa3'):
+        raise ValueError('Unsupported AP security mode')
+    if security == 'wpa2':
+        auth = 'wpa_key_mgmt=WPA-PSK\nwpa_psk={}\n'.format(psk)
+    else:
+        # hostapd parses '|mac=', '|id=' ... inside sae_password; refuse '|'.
+        if '|' in passphrase:
+            raise ValueError('WPA3 passphrase must not contain |')
+        sae = 'sae_password={}\nsae_pwe=2\nsae_require_mfp=1\n'.format(passphrase)
+        auth = ('wpa_key_mgmt=WPA-PSK SAE\nwpa_psk={}\nieee80211w=1\n'.format(psk) if security == 'wpa2_wpa3'
+                else 'wpa_key_mgmt=SAE\nieee80211w=2\n') + sae
     return ('interface={}\ndriver=nl80211\nssid2={}\n{}'
-            'auth_algs=1\nwpa=2\nwpa_key_mgmt=WPA-PSK\nrsn_pairwise=CCMP\n'
-            'wpa_psk={}\nap_isolate=1\n').format(interface, ssid.encode().hex(), radio, psk)
+            'auth_algs=1\nwpa=2\nrsn_pairwise=CCMP\n{}'
+            'ap_isolate=1\n').format(interface, ssid.encode().hex(), radio, auth)
 
 
 def choose_subnet(occupied, preferred='172.27.88.0/24'):

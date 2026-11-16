@@ -12,7 +12,8 @@ from pathlib import Path
 
 SETTINGS = Path('/data/setupOptions/RoadLink/ap-radio.json')
 PENDING = Path('/run/roadlink-ap-radio-pending.json')
-DEFAULT = {'band': '5', 'channel': 36, 'width': 'auto', 'country': 'DE'}
+DEFAULT = {'band': '5', 'channel': 36, 'width': 'auto', 'country': 'DE', 'security': 'wpa2'}
+SECURITY = ('wpa2', 'wpa2_wpa3', 'wpa3')
 FALLBACK = {'band': '2.4', 'channel': 6, 'width': 20}
 CHANNELS = {'2.4': (1, 6, 11), '5': (36, 40, 44, 48)}
 # 80 MHz blocks (non-DFS UNII-1 only) and HT40 secondary direction.
@@ -33,6 +34,8 @@ def validate(value):
         raise ValueError('Unsupported AP channel width')
     if value['band'] == '2.4' and value['width'] == 80:
         raise ValueError('80 MHz requires 5 GHz')
+    if value['security'] not in SECURITY:
+        raise ValueError('Unsupported AP security mode')
     if not isinstance(value['country'], str) or not re.fullmatch('[A-Z]{2}', value['country']) \
             or value['country'] == '00':
         raise ValueError('Invalid regulatory country')
@@ -47,6 +50,26 @@ def read(path=SETTINGS):
         return validate(json.loads(path.read_text()))
     except FileNotFoundError:
         return dict(DEFAULT)
+
+
+def sae_ap_capable(detail):
+    """WPA3-SAE as AP: firmware offload, or a mac80211 driver where hostapd runs SAE."""
+    if re.search(r'\[ SAE_OFFLOAD_AP \]', detail):
+        return True
+    soft = detail.split('software interface modes', 1)[1].split('valid interface combinations', 1)[0] \
+        if 'software interface modes' in detail else ''
+    return ('Device supports SAE with AUTHENTICATE command' in detail
+            and re.search(r'^\s*\* AP/VLAN\s*$', soft, re.M) is not None)
+
+
+def security(requested, detail):
+    """Effective mode. Mixed mode falls back to WPA2 (clients already accept it);
+    WPA3-only never silently weakens and fails closed instead."""
+    if requested == 'wpa2' or sae_ap_capable(detail):
+        return requested
+    if requested == 'wpa2_wpa3':
+        return 'wpa2'
+    raise ValueError('WPA3 is not supported by the selected AP radio')
 
 
 def band_body(detail, band):
@@ -138,7 +161,9 @@ def plan(detail, settings, failed_before=False):
             out.append('vht_oper_centr_freq_seg0_idx=' + str(VHT80[channel]))
     summary = {'band': band, 'channel': channel, 'width': width,
                'protocol': '802.11ac' if vht else '802.11n' if c['ht'] else '802.11g',
-               'country': settings['country'], 'fallback': choice['band'] != settings['band']}
+               'country': settings['country'], 'fallback': choice['band'] != settings['band'],
+               'security': security(settings['security'], detail),
+               'security_requested': settings['security']}
     return '\n'.join(out) + '\n', summary
 
 

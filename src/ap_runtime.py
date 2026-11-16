@@ -248,7 +248,8 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
     radio_detail = command(['iw', 'phy', 'phy' + phy_match.group(1), 'info']).stdout
     radio_directives, tuning = ap_tuning.plan(radio_detail, radio_settings,
                                               ap_tuning.failed_before(radio_settings))
-    config = hostapd(INTERFACE, ssid, secret.get('password', ''), radio=radio_directives)
+    config = hostapd(INTERFACE, ssid, secret.get('password', ''), radio=radio_directives,
+                     security=tuning['security'])
     radio_state = ap_radio.plan(ROOT, dev, capabilities(dev['interface']), command)
     if 'Connected to' in command(['iw', 'dev', dev['interface'], 'link']).stdout:
         raise RuntimeError('Internal radio is in use')

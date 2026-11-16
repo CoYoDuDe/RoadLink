@@ -46,6 +46,7 @@ from direct_status import ROOT as DIRECT_ROOT, current as direct_current
 from ap_runtime import command
 import radio_roles
 from radio_api import install as install_radio_api
+import ap_radio_api
 from runtime_lock import busy as runtime_locked, cleanup_ready
 import ipaddress
 import firewall_config
@@ -116,6 +117,7 @@ def main():
     install_dns_api(service)
     install_transport_api(service)
     install_radio_api(service)
+    ap_radio_api.install(service)
     from firewall_api import API as FirewallAPI
     firewall_api = FirewallAPI(service, itemtype=SecretItem)
     from portal_manager import Manager as PortalManager
@@ -385,6 +387,7 @@ def main():
                     if path_state.get('internet') else 'Internet nicht bereit')
             requested = (bool(settings['ap_enabled']), str(settings['ap_ssid']),
                          AP_SECRET.stat().st_mtime_ns if AP_SECRET.exists() else 0,
+                         ap_radio_api.signature(),
                          repr(routed_dns(configuration, vpn_state)) if use_vpn else 'direct', use_vpn,
                          bool(settings['starlink_local']))
             if wanted == 'off':
@@ -423,6 +426,7 @@ def main():
                  if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET', 'DIRECT_INTERNET') else 'Startet') if worker
                 else 'Aus')
             service['/AP/Address'] = ap_state.get('address', '') if worker else ''
+            service['/AP/Radio'] = ap_radio_api.describe(load_json(AP_ROOT / 'tuning.json', {})) if worker else ''
             service['/Status'] = (('WLAN-Internet ueber VPN' if use_vpn else 'WLAN-Internet ohne VPN') if internet else
                                   'Lokales WLAN aktiv' if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET', 'DIRECT_INTERNET')
                                   else 'Fahrzeug-WLAN startet') if worker else 'Netzwerkdiagnose'
