@@ -158,9 +158,16 @@ def ensure_head(root, config, command):
     lines+=['-I FORWARD 1 '+shlex.join(row[2:]) for row in planned]
     path=root/'starlink-local.restore'
     atomic_write(path,('\n'.join(lines+['COMMIT',''])).encode('ascii'))
-    command(['iptables-restore','-w','3','--noflush',str(path)])
-    if inspect()!=expected:raise RuntimeError('Starlink rule priority verification failed')
-    path.unlink()
+    for _ in range(3):
+        # A concurrently starting owned WAN controller can prepend its guard
+        # after the atomic restore but before inspection. Recheck exact rule
+        # ownership on every attempt; never accept a displaced exception or
+        # remove another controller's rules. Persistent contention still fails.
+        command(['iptables-restore','-w','3','--noflush',str(path)])
+        if inspect()==expected:
+            path.unlink()
+            return
+    raise RuntimeError('Starlink rule priority verification failed')
 
 
 def refresh(root, command):

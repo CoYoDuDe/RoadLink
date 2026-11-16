@@ -36,12 +36,38 @@ import vpn_status
 import portal_auto
 import portal_known
 import portal_session_runtime
-from runtime_lock import busy as runtime_locked
+from runtime_lock import (busy as runtime_locked, cleanup_with_retry,
+                          ChildrenNotStopped, ParentNameOccupied)
 
 ROOT = Path('/run/roadlink-wan')
 NS = 'roadlink-wan'
 RADIO = 'disabledrlwan'
 LOCK_FD = None
+
+
+class LeaseAttempt:
+    """Bound one selected profile's no-lease time across child restarts."""
+    def __init__(self):
+        self.profile = self.started = None
+
+    def select(self, identifier):
+        if identifier != self.profile:
+            self.profile, self.started = identifier, None
+
+    def launch(self, now):
+        if self.profile is None:
+            raise RuntimeError('Selected WLAN profile required')
+        if self.started is None:
+            self.started = now
+
+    def leased(self):
+        self.started = None
+
+    def pause(self):
+        self.started = None
+
+    def expired(self, now):
+        return self.started is not None and now - self.started > 45
 
 
 def native_interfaces():
@@ -83,7 +109,52 @@ def inside(args, check=True):
     return tracked_command(['ip', 'netns', 'exec', NS, *args], check=check)
 
 
-def stop_children():
+def association_stations(state,proc='/proc'):
+    """Find our station processes still holding the journalled WAN namespace.
+
+    A child receipt can be replaced by a later connection generation.  Cleanup
+    must not report success and discard the namespace mount while an older
+    supplicant still owns that network namespace.
+    """
+    if not isinstance(state,dict):
+        raise ValueError('WAN namespace journal required')
+    identity=(state.get('namespace_device'),state.get('namespace_inode'))
+    if identity==(None,None):
+        return []  # Namespace creation never completed.
+    if any(type(value) is not int or value<=0 for value in identity):
+        raise RuntimeError('Invalid WAN namespace journal')
+    expected=(b'wpa_supplicant',b'-Dnl80211',b'-i',b'disabledrlwan',
+              b'-c',b'/run/roadlink-wan/station.conf')
+    remaining=[]
+    for entry in Path(proc).iterdir():
+        if not entry.name.isdecimal():
+            continue
+        try:
+            namespace=(entry/'ns/net').stat()
+            if (namespace.st_dev,namespace.st_ino)!=identity:
+                continue
+            if entry.stat().st_uid!=0:
+                continue
+            argv=tuple(part for part in (entry/'cmdline').read_bytes().split(b'\0') if part)
+            if argv==expected:
+                remaining.append(int(entry.name))
+        except (FileNotFoundError,ProcessLookupError):
+            continue  # Process exited during the observation.
+    return sorted(remaining)
+
+
+def require_retained_station(identity):
+    state = load_json(ROOT / 'state.json', {})
+    if (not isinstance(identity, dict) or not identity.get('pid')
+            or load_json(ROOT / 'supplicant.json', {}) != identity
+            or not alive(identity) or not namespace_owned(state)
+            or association_stations(state) != [identity['pid']]):
+        raise RuntimeError('WAN station identity changed during association recovery')
+
+
+def stop_children(preserve_station=None):
+    if preserve_station is not None:
+        require_retained_station(preserve_station)
     import portal_session_runtime
     portal_session_runtime.stop()
     # Revoke association-bound metadata before any child can outlive a pause.
@@ -95,7 +166,9 @@ def stop_children():
     write_json(ROOT / 'portal-review-request.json', {})
     write_json(ROOT / 'portal-review-result.json', {})
     write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
-    children = [load_json(ROOT / (name + '.json'), {}) for name in ('scanner', 'mutation', 'supplicant', 'dhcp', 'dhcp_hook', 'portal', 'namespace_creator', 'enrollment')]
+    names = ('scanner', 'mutation', 'supplicant', 'dhcp', 'dhcp_hook', 'portal', 'namespace_creator', 'enrollment')
+    children = [load_json(ROOT / (name + '.json'), {}) for name in names
+                if name != 'supplicant' or preserve_station is None]
     for sig, seconds in ((signal.SIGTERM, 3), (signal.SIGKILL, 2)):
         for state in children:
             if alive(state):
@@ -105,11 +178,27 @@ def stop_children():
         while any(alive(state) for state in children) and time.monotonic() < deadline:
             time.sleep(.1)
     if any(alive(state) for state in children):
-        raise RuntimeError('Owned WLAN child could not stop')
+        raise ChildrenNotStopped('Owned WLAN child could not stop')
+    if preserve_station is not None:
+        require_retained_station(preserve_station)
     if load_json(ROOT / 'portal-rules.json', {}):
         inside([sys.executable, str(Path(__file__).with_name('portal_runtime.py')), 'cleanup'])
     socket = ROOT / 'control' / RADIO
-    if socket.is_socket(): socket.unlink()
+    if preserve_station is None and socket.is_socket(): socket.unlink()
+    if preserve_station is not None:
+        require_retained_station(preserve_station)
+
+
+def stop_association_children(supplicant):
+    """Revoke the old lease/portal without aborting the station's reconnect."""
+    if supplicant is None or supplicant.poll() is not None:
+        stop_children()
+        return False
+    identity = load_json(ROOT / 'supplicant.json', {})
+    if identity.get('pid') != supplicant.pid:
+        raise RuntimeError('WAN station receipt no longer matches its launcher')
+    stop_children(preserve_station=identity)
+    return True
 
 
 def namespace_owned(state):
@@ -126,6 +215,7 @@ def radio_info(namespace=False):
 
 def cleanup():
     (ROOT / 'cleaning').touch()
+    write_json(ROOT / 'status.json', {'state': 'STOPPING', 'ssid': '', 'internet': False})
     state = load_json(ROOT / 'state.json', {})
     errors = []
     try:
@@ -150,11 +240,14 @@ def cleanup():
             name = original['ifname']
             if name not in (state['interface'], RADIO):
                 raise RuntimeError('Radio name changed externally; restoration refused')
+            if (Path('/sys/class/net') / name / 'phy80211').resolve(strict=True).name != state['phy']:
+                raise RuntimeError('Radio PHY changed externally; restoration refused')
+            target = Path('/sys/class/net') / state['interface']
+            if name != state['interface'] and (target.exists() or target.is_symlink()):
+                raise ParentNameOccupied('Original radio name occupied; original guard retains ownership')
             command(['ip', 'link', 'set', name, 'down'])
             command(['ip', 'link', 'set', name, 'address', state['mac']])
             if name != state['interface']:
-                if Path('/sys/class/net/' + state['interface']).exists():
-                    raise RuntimeError('Original radio name occupied')
                 command(['ip', 'link', 'set', name, 'name', state['interface']])
             Path('/proc/sys/net/ipv6/conf/' + state['interface'] + '/disable_ipv6').write_text(state['ipv6'])
             if state['up']: command(['ip', 'link', 'set', state['interface'], 'up'])
@@ -162,6 +255,8 @@ def cleanup():
         if ns_path.exists():
             command(['ip', 'netns', 'del', NS])
         (ROOT / 'station.conf').unlink(missing_ok=True)
+    except (subprocess.TimeoutExpired, ChildrenNotStopped, ParentNameOccupied):
+        raise
     except Exception as exc:
         errors.append(str(exc))
     write_json(ROOT / 'result.json', {'cleaned': not errors, 'errors': errors})
@@ -181,14 +276,9 @@ def guard(pid, start, lock_fd):
     if alive({'pid': pid, 'start': start}):
         try: os.kill(pid, signal.SIGKILL)
         except ProcessLookupError: pass
-    deadline = time.monotonic() + 3
-    while alive({'pid': pid, 'start': start}) and time.monotonic() < deadline: time.sleep(.05)
-    if alive({'pid': pid, 'start': start}):
-        write_json(ROOT / 'result.json', {'cleaned': False, 'errors': ['WAN controller could not stop']})
-        write_json(ROOT / 'status.json', {'state': 'CLEANUP_FAILED', 'ssid': '', 'internet': False})
-        os.close(lock_fd)
-        return
-    try: cleanup()
+    try:
+        cleanup_with_retry(ROOT, cleanup, {'pid': pid, 'start': start}, lock_fd,
+                           wait_for_controller=True, is_alive=alive, start_token=token)
     finally: os.close(lock_fd)
 
 
@@ -334,6 +424,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
         association, connection_id = None, ''
         reserve_gate = Gate(time.monotonic())
         quality = Recorder()
+        lease_attempt = LeaseAttempt()
         latency_ms = None
         while not (ROOT / 'stop').exists():
             if not alive({'pid': parent_pid, 'start': parent_start}): break
@@ -354,11 +445,30 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                 inside(['ip', '-4', 'route', 'flush', 'default'], check=False)
                 write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
                 profile, association, connection_id, retry = None, None, '', 0
+                lease_attempt.select(None)
+                scan_ready = False
+            replacement = candidates.replacement(
+                profile, load_json(ROOT / 'status.json', {}).get('state'),
+                load_json(ROOT / 'scan.json', {}), time.time(), time.monotonic(), reserve_allowed)
+            if replacement and supplicant and supplicant.poll() is None:
+                latest = inside(['wpa_cli', '-p', str(ROOT / 'control'), '-i', RADIO, 'status'], check=False)
+                if dict(line.split('=', 1) for line in latest.stdout.splitlines()
+                        if '=' in line).get('wpa_state') == 'COMPLETED':
+                    replacement = None
+            if replacement:
+                stop_children(); supplicant = dhcp = portal = None
+                inside(['ip', 'link', 'set', RADIO, 'down'])
+                inside(['ip', '-4', 'addr', 'flush', 'dev', RADIO])
+                inside(['ip', '-4', 'route', 'flush', 'default'], check=False)
+                profile, association, connection_id, retry = replacement, None, '', 0
+                lease_attempt.select(profile['id'])
                 scan_ready = False
             if profile is None and associate:
                 profile = candidates.select(load_json(ROOT / 'scan.json', {}), time.time(), time.monotonic(),
                                             allow_last_resort=reserve_allowed)
+                lease_attempt.select(profile['id'] if profile else None)
             if profile is None:
+                lease_attempt.select(None)
                 association, connection_id = None, ''
                 if not scan_ready:
                     inside(['ip', 'link', 'set', RADIO, 'down'])
@@ -378,6 +488,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                 time.sleep(1)
                 continue
             if scanner.pending() and (scan_paused or load_json(ROOT / 'status.json', {}).get('state') != 'LEASED'):
+                lease_attempt.pause()
                 if not scan_paused:
                     stop_children(); supplicant = dhcp = None
                     inside(['ip', 'link', 'set', RADIO, 'down'])
@@ -406,6 +517,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                 supplicant = launch('supplicant', ['wpa_supplicant', '-Dnl80211', '-i', RADIO,
                                     '-c', str(ROOT / 'station.conf')])
                 started = time.monotonic()
+                lease_attempt.launch(started)
                 last_health, health_failures = 0, 0
                 latency_ms = None
             response = inside(['wpa_cli', '-p', str(ROOT / 'control'), '-i', RADIO, 'status'], check=False)
@@ -419,10 +531,27 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                 write_json(ROOT / 'portal-hints.json', {})
                 write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})
                 if dhcp is not None:
-                    stop_children(); supplicant = dhcp = None
+                    # Preserve the exact station's completed/pending reconnect;
+                    # the previous DHCP/portal generation must still be revoked.
+                    if not stop_association_children(supplicant):
+                        supplicant = None
+                    dhcp = portal = None
                     association, connection_id = None, ''
+                    last_health, health_failures = 0, 0
+                    latency_ms = None
                     inside(['ip', '-4', 'addr', 'flush', 'dev', RADIO])
                     inside(['ip', '-4', 'route', 'flush', 'default'], check=False)
+                    now = time.monotonic()
+                    lease_attempt.launch(now)
+                    if lease_attempt.expired(now):
+                        stop_children(); supplicant = None
+                        if quality.consider(Profiles(), profile, started, False, False, None, True,
+                                            now, time.time()):
+                            candidates.profiles = list(Profiles().data['profiles'].values())
+                        candidates.reject(profile['id'], now)
+                        profile = None
+                        lease_attempt.select(None)
+                        retry = now + 5
                     continue
                 connection_id = secrets.token_hex(12) if connected else ''
                 association = current_association
@@ -440,6 +569,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
             leased = (connected and dhcp and dhcp.poll() is None and wan_lease.current(lease, binding)
                       and wan_lease.owned(binding, load_json(ROOT / 'dhcp.json', {}),
                           load_json(ROOT / 'controller.json', {}), load_json(ROOT / 'guard.json', {}), state, alive))
+            if leased: lease_attempt.leased()
             resolution_due = leased and portal_pins.pending(load_json(ROOT/'portal-resolve-request.json', {}),
                 load_json(ROOT/'portal-pins.json', {}), binding, lease, load_json(ROOT/'portal-hints.json', {}),
                 load_json(ROOT/'portal-result.json', {}), time.monotonic())
@@ -504,10 +634,10 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
             captive_wait = portal_wait.allow(binding if leased else None, portal_result, time.monotonic(), proven=proven)
             first_probe = (leased and portal and portal.poll() is None
                            and time.monotonic()-portal_started < 22 and not portal_result)
-            rejected = bool(failed or ((health_failures >= 2 or tunnel_failed) and not captive_wait and not first_probe)
-                            or (supplicant and not leased and time.monotonic() - started > 45))
+            rejected = bool(failed or (((health_failures >= 2 and not proven) or tunnel_failed) and not captive_wait and not first_probe)
+                            or (supplicant and not leased and lease_attempt.expired(time.monotonic())))
             # An isolated VPN-server penalty alone is not a WLAN-quality failure.
-            quality_failed = rejected and bool(failed or health_failures >= 2 or not leased)
+            quality_failed = rejected and bool(failed or (health_failures >= 2 and not proven) or not leased)
             if quality.consider(Profiles(), profile, started, proven,
                                 bool(last_health and not health_failures), latency_ms,
                                 quality_failed, time.monotonic(), time.time()):
@@ -516,6 +646,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                 stop_children(); supplicant = dhcp = None
                 candidates.reject(profile['id'], time.monotonic())
                 profile = None
+                lease_attempt.select(None)
                 health_failures = 0
                 retry = time.monotonic() + 5
                 write_json(ROOT / 'lease.json', {'state': 'NO_LEASE'})

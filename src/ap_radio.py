@@ -5,6 +5,7 @@ import secrets
 import sys
 import time
 from storage import load_json, write_json
+from runtime_lock import ParentNameOccupied
 
 PARENT = 'disabledrlap'
 AP = 'aproadlink'
@@ -112,7 +113,7 @@ def restore_parent(root, command):
             or item.get('ifalias', '') not in (parent['alias'], TAG)):
         raise RuntimeError('AP parent ownership changed; restoration refused')
     if name != parent['interface'] and any(item['ifname'] == parent['interface'] for item in current):
-        raise RuntimeError('Original AP parent name occupied')
+        raise ParentNameOccupied('Original AP parent name occupied; original guard retains ownership')
     command(['ip', 'link', 'set', name, 'down'])
     command(['ip', 'link', 'set', name, 'address', parent['mac']])
     command(['ip', 'link', 'set', name, 'alias', parent['alias']])

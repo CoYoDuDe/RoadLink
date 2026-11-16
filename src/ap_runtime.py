@@ -22,7 +22,8 @@ from transport_config import read as transport_settings
 from direct_status import current as direct_current
 import ap_router
 import starlink_local
-from runtime_lock import busy as runtime_locked
+from runtime_lock import (busy as runtime_locked, wait_stopped, cleanup_with_retry,
+                          ChildrenNotStopped, ParentNameOccupied)
 
 ROOT = Path('/run/roadlink-ap')
 SECRET = Path('/data/setupOptions/RoadLink/ap-secret.json')
@@ -70,14 +71,20 @@ def rules():
                 yield base + ['-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED'] + tag + ['-j', 'ACCEPT']
                 if chain == 'INPUT':
                     yield base + ['-p', 'tcp', '-m', 'multiport', '--dports', '22,80,443'] + tag + ['-j', 'ACCEPT']
+                    # Venus mDNS is local to vehicle clients, never forwarded.
+                    yield base + ['-d', '224.0.0.251/32', '-p', 'udp', '--dport', '5353'] + tag + ['-j', 'ACCEPT']
+                else:
+                    # Avahi multicast and QU unicast replies originate at 5353.
+                    yield base + ['-p', 'udp', '--sport', '5353'] + tag + ['-j', 'ACCEPT']
                 yield base + ['-p', 'udp', '--sport', '68' if chain == 'INPUT' else '67',
                              '--dport', '67' if chain == 'INPUT' else '68'] + tag + ['-j', 'ACCEPT']
 
 
 def cleanup():
     import portal_session_runtime
-    portal_session_runtime.stop()
     (ROOT / 'cleaning').touch()
+    write_json(ROOT / 'status.json', {'state': 'STOPPING', 'internet': False, 'retrying': False})
+    portal_session_runtime.stop()
     errors = []
     for name in ('mutation', 'hostapd', 'dnsmasq'):
         state = load_json(ROOT / (name + '.json'), {})
@@ -100,7 +107,7 @@ def cleanup():
     while any(alive(state) for state in children) and time.monotonic() < deadline:
         time.sleep(0.1)
     if any(alive(state) for state in children):
-        errors.append('Owned AP process did not stop')
+        raise ChildrenNotStopped('Owned AP process did not stop')
     else:
         control_socket = ROOT / 'control' / INTERFACE
         if control_socket.is_socket():
@@ -110,6 +117,8 @@ def cleanup():
         try:
             ap_radio.remove_virtual(ROOT, command)
             ap_radio.restore_parent(ROOT, command)
+        except (subprocess.TimeoutExpired, ParentNameOccupied):
+            raise
         except Exception as exc:
             errors.append(str(exc))
     if not errors:
@@ -121,6 +130,8 @@ def cleanup():
                 errors.append('Firewall cleanup incomplete')
     (ROOT / 'hostapd.conf').unlink(missing_ok=True)
     write_json(ROOT / 'result.json', {'cleaned': not errors, 'errors': errors})
+    write_json(ROOT / 'status.json', {'state': 'OFF' if not errors else 'CLEANUP_FAILED',
+                                    'internet': False, 'retrying': False})
 
 
 def guard(pid, start, lock_fd):
@@ -143,7 +154,8 @@ def guard(pid, start, lock_fd):
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        cleanup()
+        cleanup_with_retry(ROOT, cleanup, {'pid': pid, 'start': start}, lock_fd,
+                           wait_for_controller=True, is_alive=alive, start_token=token)
     finally:
         os.close(lock_fd)
 
@@ -259,18 +271,16 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
         ap_router.start(ROOT, routing, command)
     if local_starlink:
         starlink_local.start(ROOT, subnet, command)
-    initial_vpn = load_json(Path('/run/roadlink-vpn/status.json'), {})
-    advertised_dns = (routing['dns'] if routing and dns_ready(vpn, initial_vpn)
-                      and routing['dns'] == initial_vpn.get('dns')
-                      and alive(load_json(Path('/run/roadlink-vpn/controller.json'), {}))
-                      and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {})) else None)
+    advertised_dns = routing['dns'] if routing else None
     if advertised_dns:
         dhcp = isolated_dhcp(INTERFACE, subnet, advertised_dns).replace(
             '/run/roadlink/ap.leases', str(ROOT / 'leases'))
         atomic_write(ROOT / 'dnsmasq.conf', dhcp.encode())
         command(['dnsmasq', '--test', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
     ap = launch('hostapd', ['hostapd', str(ROOT / 'hostapd.conf')])
-    dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
+    dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground',
+                                   '--pid-file=' + str(ROOT / 'dnsmasq.pid'),
+                                   '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
     advertised_portal=None
     ready = False
     startup_deadline = time.monotonic() + 20
@@ -300,7 +310,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
                             and routing['dns'] == vpn_state.get('dns')
                             and alive(load_json(Path('/run/roadlink-vpn/controller.json'), {}))
                             and alive(load_json(Path('/run/roadlink-vpn/guard.json'), {})))
-            desired_dns = routing['dns'] if internet else None
+            desired_dns = routing['dns'] if routing else None
             if not use_vpn:
                 direct = direct_current(subnet, dns_settings(), alive)
                 internet = bool(ready and direct)
@@ -321,6 +331,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
                     dhcp_process.kill()
                     dhcp_process.wait(timeout=2)
                 dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground',
+                                      '--pid-file=' + str(ROOT / 'dnsmasq.pid'),
                                       '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
                 advertised_dns = desired_dns
                 advertised_portal=desired_portal

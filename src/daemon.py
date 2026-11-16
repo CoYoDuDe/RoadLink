@@ -46,7 +46,7 @@ from direct_status import ROOT as DIRECT_ROOT, current as direct_current
 from ap_runtime import command
 import radio_roles
 from radio_api import install as install_radio_api
-from runtime_lock import busy as runtime_locked
+from runtime_lock import busy as runtime_locked, cleanup_ready
 import ipaddress
 import firewall_config
 
@@ -231,7 +231,7 @@ def main():
             elif (not wan_worker and wan_requested and time.monotonic() >= wan_retry_at
                   and not runtime_locked(WAN_ROOT)
                   and not alive(load_json(WAN_ROOT / 'guard.json', {}))):
-                if load_json(WAN_ROOT / 'result.json', {'cleaned': True}).get('cleaned'):
+                if cleanup_ready(WAN_ROOT):
                     wan_signature = wan_current
                     wan_worker = subprocess.Popen([sys.executable,
                         str(Path(__file__).with_name('wan_runtime.py')), 'serve',
@@ -247,8 +247,7 @@ def main():
             elif (not vpn_worker and vpn_requested and time.monotonic() >= vpn_retry_at
                   and not runtime_locked(VPN_ROOT)
                   and not alive(load_json(VPN_ROOT / 'guard.json', {}))):
-                result = load_json(VPN_ROOT / 'result.json', {'cleaned': True})
-                if result.get('cleaned'):
+                if cleanup_ready(VPN_ROOT):
                     vpn_signature = vpn_current
                     vpn_worker = subprocess.Popen([sys.executable,
                         str(Path(__file__).with_name('vpn_runtime.py')), 'serve',
@@ -264,7 +263,7 @@ def main():
             elif (not direct_worker and direct_requested and time.monotonic() >= direct_retry_at
                   and not runtime_locked(DIRECT_ROOT)
                   and not alive(load_json(DIRECT_ROOT / 'guard.json', {}))
-                  and load_json(DIRECT_ROOT / 'result.json', {'cleaned': True}).get('cleaned')):
+                  and cleanup_ready(DIRECT_ROOT)):
                 direct_signature = direct_current_signature
                 direct_worker = subprocess.Popen([sys.executable,
                     str(Path(__file__).with_name('direct_runtime.py')), 'serve',
