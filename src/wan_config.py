@@ -4,7 +4,7 @@ import re
 from privacy import validate_mac
 
 
-def station(profile, control):
+def station(profile, control, country=None):
     ssid = profile['ssid']
     if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32 or '\0' in ssid:
         raise ValueError('Invalid external SSID')
@@ -29,7 +29,16 @@ def station(profile, control):
     # No directed hidden-SSID probes, WPS enrollment, P2P or config mutation.
     # Venus 3.81 builds without the P2P configuration field. No P2P or WPS
     # command is used; runtime must verify that only a managed interface exists.
-    return ('ctrl_interface={}\nupdate_config=0\n'
+    if country is None:
+        try:
+            import ap_tuning
+            country = ap_tuning.read()['country']
+        except (ValueError, OSError, ImportError):
+            country = 'DE'
+    if not re.fullmatch('[A-Z]{2}', country) or country == '00':
+        raise ValueError('Invalid regulatory country')
+    # Country lets the station actively use 5 GHz channels allowed there.
+    return ('country=' + country + '\nctrl_interface={}\nupdate_config=0\n'
             'mac_addr=0\npreassoc_mac_addr=0\nnetwork={{\nssid={}\nscan_ssid=0\n{}}}\n').format(
                 control, ssid.encode().hex(), network)
 
