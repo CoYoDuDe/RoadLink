@@ -4,6 +4,11 @@ MbPage {
     title: qsTr("RoadLink")
     model: VisibleItemModel {
         MbSubMenu { description: qsTr("Fahrzeug-WLAN"); subpage: Component { PageRoadLinkAP {} } }
+        MbSubMenu {
+            property VBusItem clientCount: VBusItem { bind: "com.coyodude.roadlink/Clients/Count" }
+            description: qsTr("Verbundene Geraete") + (clientCount.value !== undefined && clientCount.value !== null ? " (" + clientCount.value + ")" : "")
+            subpage: Component { PageRoadLinkClients {} }
+        }
         MbSubMenu { description: qsTr("Externe WLANs"); subpage: Component { PageRoadLinkWifi {} } }
         MbSubMenu { description: qsTr("Internet und Umschaltung"); subpage: Component { PageRoadLinkWAN {} } }
         MbSubMenu { description: qsTr("WLAN-Anmeldung"); subpage: Component { PageRoadLinkPortal {} } }
