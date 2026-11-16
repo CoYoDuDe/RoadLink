@@ -280,6 +280,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
     except (ValueError, OSError):
         blocked_clients = {}
     atomic_write(ROOT / 'client-deny.list', ap_clients_api.deny_file_text(blocked_clients).encode('ascii'))
+    sae = radio_settings['security'] != 'wpa2' and ap_tuning.hostapd_sae_supported()
     plans = []
     for radio_dev, band, names, child_name in radios:
         phy_info = command(['iw', 'dev', radio_dev['interface'], 'info']).stdout
@@ -288,7 +289,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
             raise RuntimeError('Selected AP radio has no wiphy')
         radio_detail = command(['iw', 'phy', 'phy' + phy_match.group(1), 'info']).stdout
         radio_directives, radio_tuning = ap_tuning.plan(
-            radio_detail, radio_settings, len(radios) == 1 and ap_tuning.failed_before(radio_settings), band)
+            radio_detail, radio_settings, len(radios) == 1 and ap_tuning.failed_before(radio_settings), band, sae)
         radio_config = hostapd(names['ap'], ssid, secret.get('password', ''), radio=radio_directives,
                                security=radio_tuning['security'])
         radio_config += 'ctrl_interface=' + str(ROOT / 'control') + '\n'

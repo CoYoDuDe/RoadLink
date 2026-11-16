@@ -74,14 +74,59 @@ def sae_ap_capable(detail):
             and re.search(r'^\s*\* AP/VLAN\s*$', soft, re.M) is not None)
 
 
-def security(requested, detail):
-    """Effective mode. Mixed mode falls back to WPA2 (clients already accept it);
-    WPA3-only never silently weakens and fails closed instead."""
-    if requested == 'wpa2' or sae_ap_capable(detail):
+SAE_PROBE_CACHE = Path('/run/roadlink-hostapd-sae.json')
+
+
+def hostapd_sae_supported(run=None, binary='/usr/sbin/hostapd', cache=SAE_PROBE_CACHE):
+    """Does the installed hostapd accept SAE (WPA3)? Stock Venus OS builds do not.
+
+    hostapd parses the whole configuration before touching an interface, so a
+    probe with a non-existent interface reports only configuration errors.
+    The result is cached per binary identity.
+    """
+    import os
+    import subprocess
+    import tempfile
+    try:
+        info = os.stat(binary)
+    except OSError:
+        return False
+    identity = [info.st_size, int(info.st_mtime)]
+    try:
+        cached = json.loads(Path(cache).read_text())
+        if cached.get('binary') == identity:
+            return cached.get('sae') is True
+    except (OSError, ValueError, AttributeError):
+        pass
+    run = run or subprocess.run
+    with tempfile.TemporaryDirectory(prefix='rl-sae-') as directory:
+        conf = Path(directory) / 'probe.conf'
+        conf.write_text('interface=rlsaeprobe0\ndriver=nl80211\nssid=probe\nhw_mode=g\nchannel=6\n'
+                        'wpa=2\nwpa_key_mgmt=SAE\nrsn_pairwise=CCMP\nieee80211w=2\n'
+                        'sae_password=probepassword\n')
+        try:
+            result = run([binary, str(conf)], capture_output=True, text=True, timeout=5)
+            output = (result.stdout or '') + (result.stderr or '')
+        except Exception:
+            return False
+    supported = ('invalid key_mgmt' not in output and 'unknown configuration item' not in output
+                 and 'errors found in configuration' not in output)
+    try:
+        Path(cache).write_text(json.dumps({'binary': identity, 'sae': supported}))
+    except OSError:
+        pass
+    return supported
+
+
+def security(requested, detail, hostapd_sae=True):
+    """Effective mode; never takes the vehicle WLAN down for an unavailable WPA3.
+
+    Without SAE support in the radio or in the installed hostapd the AP uses
+    WPA2/CCMP and the menu shows that WPA3 is not available.
+    """
+    if requested == 'wpa2' or (hostapd_sae and sae_ap_capable(detail)):
         return requested
-    if requested == 'wpa2_wpa3':
-        return 'wpa2'
-    raise ValueError('WPA3 is not supported by the selected AP radio')
+    return 'wpa2'
 
 
 def band_body(detail, band):
@@ -117,7 +162,7 @@ def caps(body):
             'vht_ldpc': vhas('RX LDPC'), 'vht_tx_stbc': vhas('TX STBC')}
 
 
-def plan(detail, settings, failed_before=False, band=None):
+def plan(detail, settings, failed_before=False, band=None, hostapd_sae=True):
     """Return (directives, summary) for one radio's `iw phy` text.
 
     `band` selects the band for this radio; it is required in 'both' mode,
@@ -186,7 +231,7 @@ def plan(detail, settings, failed_before=False, band=None):
     summary = {'band': band, 'channel': channel, 'width': width,
                'protocol': '802.11ac' if vht else '802.11n' if c['ht'] else '802.11g',
                'country': settings['country'], 'fallback': choice['band'] != requested_band,
-               'security': security(settings['security'], detail),
+               'security': security(settings['security'], detail, hostapd_sae),
                'security_requested': settings['security']}
     return '\n'.join(out) + '\n', summary
 

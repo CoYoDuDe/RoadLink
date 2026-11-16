@@ -83,7 +83,7 @@ def describe(tuning):
     if tuning.get('fallback'):
         text += ' (Ausweichbetrieb)'
     if tuning.get('security_requested') not in (None, tuning.get('security')):
-        text += ' (WPA3 vom Funkchip nicht unterstuetzt)'
+        text += ' (WPA3 hier nicht verfuegbar, WPA2 aktiv)'
     return text
 
 
