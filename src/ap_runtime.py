@@ -342,7 +342,10 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
                     ap_router.reconcile(command)
                     route_alarm = None
                 except RuntimeError as error:
-                    observed = command(['ip', '-j', '-4', 'route', 'show', 'table', ap_router.TABLE], check=False)
+                    if (ROOT / 'stop').exists() or (ROOT / 'cleaning').exists():
+                        raise  # regular shutdown, not a route problem
+                    observed = subprocess.run(['ip', '-j', '-4', 'route', 'show', 'table', ap_router.TABLE],
+                                              capture_output=True, text=True, timeout=8)
                     print('AP route check: {}; table: {}'.format(error, (observed.stdout or '')[:600]), flush=True)
                     route_alarm = route_alarm or time.monotonic()
                     if time.monotonic() - route_alarm > 10:
