@@ -12,6 +12,7 @@ import sys
 import time
 from ap_runtime import command as raw_command, token, alive
 from storage import atomic_write, load_json, write_json
+from readonly_command import is_readonly
 from vpn_config import read
 from wireguard import KEY, ensure_public_key
 import vpn_transport
@@ -52,6 +53,8 @@ def command(args, check=True):
     start = token(os.getpid())
     authorize_command(os.getpid(), start, args)
     atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
+    if is_readonly(args):
+        return subprocess.run(list(args), capture_output=True, text=True, timeout=8, check=check)
     return subprocess.run([sys.executable, __file__, 'child', str(os.getpid()), start,
                            str(LOCK_FD), *args], capture_output=True, text=True,
                           timeout=8, check=check, pass_fds=(LOCK_FD,))

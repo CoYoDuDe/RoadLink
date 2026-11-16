@@ -15,6 +15,7 @@ import firewall_guard
 from hardware import inspect_interfaces, capabilities
 import radio_roles
 import ap_radio
+from readonly_command import is_readonly
 from storage import atomic_write, load_json, write_json
 from vpn_config import read as vpn_config
 from dns_config import routed as routed_dns, ready as dns_ready
@@ -42,6 +43,11 @@ def tracked(args, check=True):
             or not alive(load_json(ROOT / 'guard.json', {}))):
         raise RuntimeError('AP controller stopping')
     atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
+    if is_readonly(args):
+        result = subprocess.run(list(args), capture_output=True, text=True, timeout=8)
+        if check and result.returncode:
+            raise RuntimeError('AP command failed: ' + result.stderr[-1024:])
+        return result
     result = subprocess.run([sys.executable, __file__, 'child', 'mutation', str(os.getpid()),
                              token(os.getpid()), str(LOCK_FD), *args], capture_output=True,
                             text=True, timeout=8, pass_fds=(LOCK_FD,))

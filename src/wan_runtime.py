@@ -18,6 +18,7 @@ from privacy import profile_mac
 from wan_scan import Scanner
 from open_wifi import Candidates
 from storage import atomic_write, load_json, write_json
+from readonly_command import is_readonly
 from wan_config import station, dhcp_args, client_name
 from wan_bridge import plan, rules, ipv6_rules, bootstrap_rules
 from vpn_config import read as vpn_config
@@ -92,6 +93,8 @@ def pulse():
 def tracked_command(args, check=True):
     controller = load_json(ROOT / 'controller.json', {})
     if controller.get('pid') == os.getpid() and not (ROOT / 'cleaning').exists():
+        if is_readonly(args):
+            return subprocess.run(list(args), capture_output=True, text=True, timeout=8, check=check)
         return subprocess.run([sys.executable, __file__, 'child', 'mutation', str(os.getpid()),
                                token(os.getpid()), str(LOCK_FD), *args], capture_output=True, text=True,
                               timeout=8, check=check, pass_fds=(LOCK_FD,))
