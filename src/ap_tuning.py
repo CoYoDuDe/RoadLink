@@ -75,6 +75,9 @@ def sae_ap_capable(detail):
 
 
 SAE_PROBE_CACHE = Path('/run/roadlink-hostapd-sae.json')
+SYSTEM_HOSTAPD = '/usr/sbin/hostapd'
+# Optional private build with CONFIG_SAE (stock Venus hostapd lacks it). Never in the public package.
+CUSTOM_HOSTAPD = Path('/data/setupOptions/RoadLink/bin/hostapd-sae')
 
 
 def hostapd_sae_supported(run=None, binary='/usr/sbin/hostapd', cache=SAE_PROBE_CACHE):
@@ -92,8 +95,9 @@ def hostapd_sae_supported(run=None, binary='/usr/sbin/hostapd', cache=SAE_PROBE_
     except OSError:
         return False
     identity = [info.st_size, int(info.st_mtime)]
+    identity.append(str(binary))
     try:
-        cached = json.loads(Path(cache).read_text())
+        cached = json.loads(Path(cache).read_text()).get(str(binary), {})
         if cached.get('binary') == identity:
             return cached.get('sae') is True
     except (OSError, ValueError, AttributeError):
@@ -112,10 +116,40 @@ def hostapd_sae_supported(run=None, binary='/usr/sbin/hostapd', cache=SAE_PROBE_
     supported = ('invalid key_mgmt' not in output and 'unknown configuration item' not in output
                  and 'errors found in configuration' not in output)
     try:
-        Path(cache).write_text(json.dumps({'binary': identity, 'sae': supported}))
+        try:
+            entries = json.loads(Path(cache).read_text())
+            entries = entries if isinstance(entries, dict) else {}
+        except (OSError, ValueError):
+            entries = {}
+        entries[str(binary)] = {'binary': identity, 'sae': supported}
+        Path(cache).write_text(json.dumps(entries))
     except OSError:
         pass
     return supported
+
+
+def trusted_binary(path):
+    """Root-owned regular executable, not writable by group/others, in a root-only directory."""
+    import os
+    import stat
+    try:
+        info, parent = os.lstat(path), os.lstat(os.path.dirname(str(path)))
+    except OSError:
+        return False
+    return (stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
+            and info.st_mode & 0o100 and parent.st_uid == 0 and not parent.st_mode & 0o022)
+
+
+def select_hostapd(requested_security, probe=None, custom=CUSTOM_HOSTAPD):
+    """(binary, sae_available) for the requested security mode."""
+    probe = probe or hostapd_sae_supported
+    if requested_security == 'wpa2':
+        return SYSTEM_HOSTAPD, False
+    if probe(binary=SYSTEM_HOSTAPD):
+        return SYSTEM_HOSTAPD, True
+    if trusted_binary(custom) and probe(binary=str(custom)):
+        return str(custom), True
+    return SYSTEM_HOSTAPD, False
 
 
 def security(requested, detail, hostapd_sae=True):

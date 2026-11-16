@@ -280,7 +280,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
     except (ValueError, OSError):
         blocked_clients = {}
     atomic_write(ROOT / 'client-deny.list', ap_clients_api.deny_file_text(blocked_clients).encode('ascii'))
-    sae = radio_settings['security'] != 'wpa2' and ap_tuning.hostapd_sae_supported()
+    sae_binary, sae = ap_tuning.select_hostapd(radio_settings['security'])
     plans = []
     for radio_dev, band, names, child_name in radios:
         phy_info = command(['iw', 'dev', radio_dev['interface'], 'info']).stdout
@@ -299,7 +299,9 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
         radio_state = ap_radio.plan(ROOT, radio_dev, capabilities(radio_dev['interface']), command, names)
         if 'Connected to' in command(['iw', 'dev', radio_dev['interface'], 'link']).stdout:
             raise RuntimeError('Internal radio is in use')
-        plans.append({'names': names, 'child': child_name, 'config': radio_config,
+        binary = sae_binary if radio_tuning['security'] != 'wpa2' else ap_tuning.SYSTEM_HOSTAPD
+        radio_tuning['hostapd'] = 'eigener Build (WPA3)' if binary != ap_tuning.SYSTEM_HOSTAPD else 'Venus'
+        plans.append({'names': names, 'child': child_name, 'config': radio_config, 'binary': binary,
                       'state': radio_state, 'tuning': radio_tuning})
     tuning = plans[0]['tuning'] if len(plans) == 1 else {'mode': 'dual', 'radios': [x['tuning'] for x in plans]}
     routes = json.loads(command(['ip', '-j', '-4', 'route', 'show', 'table', 'all']).stdout)
@@ -359,7 +361,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
     risky = len(plans) > 1 or tuning.get('band') == '5'
     if risky:
         ap_tuning.mark_pending(radio_settings)
-    hostapds = [launch(x['child'], ['hostapd', str(ROOT / (x['child'] + '.conf'))]) for x in plans]
+    hostapds = [launch(x['child'], [x['binary'], str(ROOT / (x['child'] + '.conf'))]) for x in plans]
     ap = hostapds[0]
     dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground',
                                    '--pid-file=' + str(ROOT / 'dnsmasq.pid'),
