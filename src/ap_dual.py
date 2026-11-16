@@ -17,6 +17,7 @@ ENTER_SECONDS = 120
 REENTER_SECONDS = 900  # after a fallback: avoid flapping (each switch drops the WLAN ~1 min)
 LEAVE_SECONDS = 60
 RADIO_CACHE_SECONDS = 30
+BUSY_MAX_DEFER_SECONDS = 300  # owner: restarts are acceptable; 2.4 GHz (repeater) must not wait long
 BUSY_BYTES_PER_SECOND = 125000  # ~1 Mbit/s on the vehicle WLAN defers an elective switch
 
 
@@ -58,6 +59,7 @@ class Decision:
         self.radio_cache = (None, -1e9)
         self.reason = ''
         self.fell_back = False
+        self.busy_since = None
 
     def _radios(self):
         value, at = self.radio_cache
@@ -91,11 +93,12 @@ class Decision:
             self.active, self.reason, self.fell_back = False, 'uplink_down', True
         elif (not self.active and self.ok_since is not None
               and now - self.ok_since >= (REENTER_SECONDS if self.fell_back else ENTER_SECONDS)):
-            if ap_busy:
-                # Entering dual restarts the vehicle WLAN; never interrupt active use for it.
+            self.busy_since = self.busy_since or now
+            if ap_busy and now - self.busy_since < BUSY_MAX_DEFER_SECONDS:
+                # Entering dual restarts the vehicle WLAN; wait briefly for a quiet moment.
                 self.reason = 'busy'
             else:
-                self.active, self.reason = True, 'dual'
+                self.active, self.reason, self.busy_since = True, 'dual', None
         elif not self.active and self.reason not in ('uplink_down', 'busy'):
             self.reason = 'waiting'
         return self.active
