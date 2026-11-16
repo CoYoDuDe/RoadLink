@@ -53,6 +53,13 @@ def resolve(devices, role, value):
             found = [device for device in found if device['identity'] == identity]
         return found
     usb_radios = pick('wifi_wan_candidate', value['usb_identity'])
+    if not usb_radios and value['usb_identity']:
+        # Adapters without a real serial (MT7612: 000000000) are identified by USB port;
+        # after moving the stick to another port, accept exactly one radio of the same model.
+        model = ':'.join(value['usb_identity'].split(':')[:3]) + ':'
+        same_model = [device for device in pick('wifi_wan_candidate') if device['identity'].startswith(model)]
+        if len(same_model) == 1:
+            usb_radios = same_model
     if role == 'vehicle_ap' and usb and not usb_radios:
         # USB radio absent or quarantined: the vehicle WLAN falls back to the internal radio.
         candidates = pick('vehicle_ap_candidate')
