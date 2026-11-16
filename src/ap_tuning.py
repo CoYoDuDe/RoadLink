@@ -110,7 +110,10 @@ def plan(detail, settings, failed_before=False):
         width = 80
     out = ['country_code=' + settings['country'], 'ieee80211d=1',
            'hw_mode=' + ('a' if band == '5' else 'g'), 'channel=' + str(channel),
-           'wmm_enabled=1']
+           'wmm_enabled=1',
+           # Weak long-range links (e.g. apartment repeater at -85 dBm) must not be
+           # kicked on missing ACKs or short idle periods; they reconnect constantly.
+           'disassoc_low_ack=0', 'ap_max_inactivity=600']
     if c['ht']:
         flags = []
         if width >= 40:
