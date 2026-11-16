@@ -527,6 +527,10 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
             status = dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
             connected = status.get('wpa_state') == 'COMPLETED'
             current_association = (profile['id'], status.get('bssid', '')) if connected else None
+            if connected and current_association != association:
+                # brcmfmac re-enables power save on every association; it costs
+                # latency and throughput on the uplink. Best effort, never fatal.
+                inside(['iw', 'dev', RADIO, 'set', 'power_save', 'off'], check=False)
             if current_association != association:
                 # Revoke old hints before terminating their DHCP hook. A roam
                 # or disconnect must never inherit the preceding lease/portal.

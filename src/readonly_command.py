@@ -40,6 +40,8 @@ def is_readonly(args):
         return bool(flags & _IPT_READ) and not flags & _IPT_WRITE
     if tool == 'hostapd_cli':
         return len(args) >= 2 and args[-1] in _HOSTAPD_READ
+    if tool == 'wpa_cli':
+        return len(args) >= 2 and args[-1] in ('status', 'signal_poll', 'ping')
     if tool == 'iw':
         if args[1:] in (['reg', 'get'],):
             return True

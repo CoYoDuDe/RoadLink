@@ -305,6 +305,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
                                    '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
     advertised_portal=None
     ready = False
+    route_alarm = None
     startup_deadline = time.monotonic() + 20
     while not (ROOT / 'result.json').exists():
         if not alive(load_json(ROOT / 'guard.json', {})):
@@ -327,7 +328,18 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
                 (ROOT / 'stop').touch()
             vpn_state = load_json(Path('/run/roadlink-vpn/status.json'), {})
             if routing:
-                ap_router.reconcile(command)
+                # A VPN restart briefly leaves transient kernel route states. Keep the
+                # ownership check, but only stop the AP (and drop every client) if a
+                # foreign route persists; log the observed routes for diagnosis.
+                try:
+                    ap_router.reconcile(command)
+                    route_alarm = None
+                except RuntimeError as error:
+                    observed = command(['ip', '-j', '-4', 'route', 'show', 'table', ap_router.TABLE], check=False)
+                    print('AP route check: {}; table: {}'.format(error, (observed.stdout or '')[:600]), flush=True)
+                    route_alarm = route_alarm or time.monotonic()
+                    if time.monotonic() - route_alarm > 10:
+                        raise
             if local_starlink:
                 starlink_local.refresh(ROOT, command)
             internet = bool(ready and routing and dns_ready(vpn, vpn_state)
