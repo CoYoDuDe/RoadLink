@@ -30,6 +30,8 @@ from runtime_lock import (busy as runtime_locked, wait_stopped, cleanup_with_ret
 ROOT = Path('/run/roadlink-ap')
 SECRET = Path('/data/setupOptions/RoadLink/ap-secret.json')
 INTERFACE = 'aproadlink'
+DUAL_PORTS = ('aprl24', 'aprl5')
+CHILDREN = ('mutation', 'hostapd', 'hostapd5', 'dnsmasq')
 TAG = 'roadlink-ap-owned'
 LOCK_FD = None
 
@@ -87,13 +89,26 @@ def rules():
                              '--dport', '67' if chain == 'INPUT' else '68'] + tag + ['-j', 'ACCEPT']
 
 
+def remove_bridge(command):
+    """Delete the owned dual-band bridge; a foreign device with the AP name is retained."""
+    current = json.loads(command(['ip', '-j', '-d', 'link', 'show']).stdout)
+    for item in current:
+        if item.get('ifname') != INTERFACE:
+            continue
+        if item.get('linkinfo', {}).get('info_kind') != 'bridge':
+            raise RuntimeError('AP interface still present after radio removal')
+        if item.get('ifalias') != ap_radio.TAG:
+            raise RuntimeError('Foreign bridge with the AP name; retained for inspection')
+        command(['ip', 'link', 'del', INTERFACE])
+
+
 def cleanup():
     import portal_session_runtime
     (ROOT / 'cleaning').touch()
     write_json(ROOT / 'status.json', {'state': 'STOPPING', 'internet': False, 'retrying': False})
     portal_session_runtime.stop()
     errors = []
-    for name in ('mutation', 'hostapd', 'dnsmasq'):
+    for name in CHILDREN:
         state = load_json(ROOT / (name + '.json'), {})
         if alive(state):
             try:
@@ -101,7 +116,7 @@ def cleanup():
             except ProcessLookupError:
                 pass
     deadline = time.monotonic() + 3
-    children = [load_json(ROOT / (name + '.json'), {}) for name in ('mutation', 'hostapd', 'dnsmasq')]
+    children = [load_json(ROOT / (name + '.json'), {}) for name in CHILDREN]
     while any(alive(state) for state in children) and time.monotonic() < deadline:
         time.sleep(0.1)
     for state in children:
@@ -116,14 +131,19 @@ def cleanup():
     if any(alive(state) for state in children):
         raise ChildrenNotStopped('Owned AP process did not stop')
     else:
-        control_socket = ROOT / 'control' / INTERFACE
-        if control_socket.is_socket():
-            control_socket.unlink()
+        for name in (INTERFACE, *DUAL_PORTS):
+            control_socket = ROOT / 'control' / name
+            if control_socket.is_socket():
+                control_socket.unlink()
     # Remove interface before permitting traffic by removing the owned rules.
     if not errors:
         try:
-            ap_radio.remove_virtual(ROOT, command)
-            ap_radio.restore_parent(ROOT, command)
+            journals = [j for j in ('radio.json', 'radio5.json') if (ROOT / j).exists()] or ['radio.json']
+            for journal in journals:
+                ap_radio.remove_virtual(ROOT, command, journal)
+            remove_bridge(command)
+            for journal in journals:
+                ap_radio.restore_parent(ROOT, command, journal)
         except (subprocess.TimeoutExpired, ParentNameOccupied):
             raise
         except Exception as exc:
@@ -135,7 +155,8 @@ def cleanup():
             command([rule[0], '-w', '3', '-D', *rule[1:]], check=False)
             if command([rule[0], '-w', '3', '-C', *rule[1:]], check=False).returncode == 0:
                 errors.append('Firewall cleanup incomplete')
-    (ROOT / 'hostapd.conf').unlink(missing_ok=True)
+    for name in ('hostapd.conf', 'hostapd5.conf'):
+        (ROOT / name).unlink(missing_ok=True)
     write_json(ROOT / 'result.json', {'cleaned': not errors, 'errors': errors})
     write_json(ROOT / 'status.json', {'state': 'OFF' if not errors else 'CLEANUP_FAILED',
                                     'internet': False, 'retrying': False})
@@ -177,7 +198,7 @@ def launch(name, args):
 
 
 def child(name, parent_pid, parent_start, lock_fd, args):
-    if name not in ('hostapd', 'dnsmasq', 'mutation'):
+    if name not in CHILDREN:
         raise ValueError('Unknown AP child')
     write_json(ROOT / (name + '.json'), {'pid': os.getpid(), 'start': token(os.getpid())})
     if ((ROOT / 'cleaning').exists() or (ROOT / 'stop').exists()
@@ -206,7 +227,7 @@ def stop():
     raise RuntimeError('AP cleanup is incomplete; refusing installation/uninstall')
 
 
-def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=False):
+def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=False, dual=False):
     global LOCK_FD
     firewall = firewall_guard.snapshot()
     command = globals()['command']
@@ -218,7 +239,7 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
     lock = open('/run/roadlink-ap.lock', 'a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     LOCK_FD = lock.fileno()
-    if Path('/sys/class/net/' + INTERFACE).exists():
+    if any(Path('/sys/class/net/' + name).exists() for name in (INTERFACE, *DUAL_PORTS)):
         raise RuntimeError('AP interface already exists; refusing to take ownership')
     if ROOT.exists():
         if ROOT.is_symlink() or ROOT.stat().st_uid != 0 or ROOT.stat().st_mode & 0o077:
@@ -236,23 +257,50 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
         ROOT.mkdir(mode=0o700)
     write_json(ROOT / 'result.json', {'cleaned': True, 'errors': []})
     secret = load_json(SECRET, {})
-    dev = radio_roles.resolve(inspect_interfaces(), 'vehicle_ap', role_settings)
+    devices = inspect_interfaces()
+    dev = radio_roles.resolve(devices, 'vehicle_ap', role_settings)
     import ap_tuning
     radio_settings = ap_tuning.read()
     command(['iw', 'reg', 'set', radio_settings['country']], check=False)
     time.sleep(0.5)  # let cfg80211 apply the regulatory domain to channel flags
-    phy_info = command(['iw', 'dev', dev['interface'], 'info']).stdout
-    phy_match = re.search(r'^\s*wiphy (\d+)\s*$', phy_info, re.M)
-    if not phy_match:
-        raise RuntimeError('Selected AP radio has no wiphy')
-    radio_detail = command(['iw', 'phy', 'phy' + phy_match.group(1), 'info']).stdout
-    radio_directives, tuning = ap_tuning.plan(radio_detail, radio_settings,
-                                              ap_tuning.failed_before(radio_settings))
-    config = hostapd(INTERFACE, ssid, secret.get('password', ''), radio=radio_directives,
-                     security=tuning['security'])
-    radio_state = ap_radio.plan(ROOT, dev, capabilities(dev['interface']), command)
-    if 'Connected to' in command(['iw', 'dev', dev['interface'], 'link']).stdout:
-        raise RuntimeError('Internal radio is in use')
+    if radio_settings['band'] == 'both' and dual and not ap_tuning.failed_before(radio_settings):
+        # USB radio (ALFA) on 2.4 GHz for range, internal radio on 5 GHz for speed.
+        radios = [(radio_roles.resolve(devices, 'vehicle_ap', dict(role_settings, vehicle_ap='usb')),
+                   '2.4', ap_radio.DUAL[0], 'hostapd'),
+                  (radio_roles.resolve(devices, 'vehicle_ap', dict(role_settings, vehicle_ap='internal')),
+                   '5', ap_radio.DUAL[1], 'hostapd5')]
+    else:
+        band = None
+        if radio_settings['band'] == 'both':  # single-radio fallback keeps its natural band
+            band = '2.4' if role_settings['vehicle_ap'] == 'usb' else '5'
+        radios = [(dev, band, ap_radio.SINGLE, 'hostapd')]
+    import ap_clients_api
+    try:
+        blocked_clients = ap_clients_api.read_blocked()
+    except (ValueError, OSError):
+        blocked_clients = {}
+    atomic_write(ROOT / 'client-deny.list', ap_clients_api.deny_file_text(blocked_clients).encode('ascii'))
+    plans = []
+    for radio_dev, band, names, child_name in radios:
+        phy_info = command(['iw', 'dev', radio_dev['interface'], 'info']).stdout
+        phy_match = re.search(r'^\s*wiphy (\d+)\s*$', phy_info, re.M)
+        if not phy_match:
+            raise RuntimeError('Selected AP radio has no wiphy')
+        radio_detail = command(['iw', 'phy', 'phy' + phy_match.group(1), 'info']).stdout
+        radio_directives, radio_tuning = ap_tuning.plan(
+            radio_detail, radio_settings, len(radios) == 1 and ap_tuning.failed_before(radio_settings), band)
+        radio_config = hostapd(names['ap'], ssid, secret.get('password', ''), radio=radio_directives,
+                               security=radio_tuning['security'])
+        radio_config += 'ctrl_interface=' + str(ROOT / 'control') + '\n'
+        radio_config += 'macaddr_acl=0\ndeny_mac_file=' + str(ROOT / 'client-deny.list') + '\n'
+        if len(radios) > 1:
+            radio_config += 'bridge=' + INTERFACE + '\n'
+        radio_state = ap_radio.plan(ROOT, radio_dev, capabilities(radio_dev['interface']), command, names)
+        if 'Connected to' in command(['iw', 'dev', radio_dev['interface'], 'link']).stdout:
+            raise RuntimeError('Internal radio is in use')
+        plans.append({'names': names, 'child': child_name, 'config': radio_config,
+                      'state': radio_state, 'tuning': radio_tuning})
+    tuning = plans[0]['tuning'] if len(plans) == 1 else {'mode': 'dual', 'radios': [x['tuning'] for x in plans]}
     routes = json.loads(command(['ip', '-j', '-4', 'route', 'show', 'table', 'all']).stdout)
     subnet = choose_subnet([r['dst'] for r in routes if r.get('dst') not in (None, 'default')])
     address = str(ipaddress.ip_network(subnet)[1])
@@ -260,15 +308,8 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
     vpn = vpn_config() if use_vpn else None
     vpn_status = load_json(Path('/run/roadlink-vpn/status.json'), {})
     routing = ap_router.plan(subnet, routed_dns(vpn, vpn_status), firewall) if vpn and vpn['enabled'] else None
-    config += 'ctrl_interface=' + str(ROOT / 'control') + '\n'
-    import ap_clients_api
-    try:
-        blocked_clients = ap_clients_api.read_blocked()
-    except (ValueError, OSError):
-        blocked_clients = {}
-    atomic_write(ROOT / 'client-deny.list', ap_clients_api.deny_file_text(blocked_clients).encode('ascii'))
-    config += 'macaddr_acl=0\ndeny_mac_file=' + str(ROOT / 'client-deny.list') + '\n'
-    atomic_write(ROOT / 'hostapd.conf', config.encode())
+    for plan_item in plans:
+        atomic_write(ROOT / (plan_item['child'] + '.conf'), plan_item['config'].encode())
     dhcp = isolated_dhcp(INTERFACE, subnet).replace('/run/roadlink/ap.leases', str(ROOT / 'leases'))
     atomic_write(ROOT / 'dnsmasq.conf', dhcp.encode())
     command(['dnsmasq', '--test', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
@@ -288,7 +329,17 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
     signal.signal(signal.SIGINT, lambda *_: (ROOT / 'stop').touch())
     for rule in rules():
         command([rule[0], '-w', '3', '-I', rule[1], '1', *rule[2:]])
-    ap_radio.acquire(ROOT, radio_state, command)
+    for plan_item in plans:
+        ap_radio.acquire(ROOT, plan_item['state'], command)
+    if len(plans) > 1:
+        # Owned bridge carrying the AP name: every L3 rule keyed on INTERFACE stays valid.
+        # Ports are isolated, so clients on different radios never reach each other.
+        command(['ip', 'link', 'add', INTERFACE, 'type', 'bridge', 'stp_state', '0'])
+        command(['ip', 'link', 'set', INTERFACE, 'alias', ap_radio.TAG])
+        for plan_item in plans:
+            port = plan_item['names']['ap']
+            command(['ip', 'link', 'set', port, 'master', INTERFACE])
+            command(['ip', 'link', 'set', port, 'type', 'bridge_slave', 'isolated', 'on', 'learning', 'on'])
     command(['sysctl', '-qw', 'net.ipv6.conf.' + INTERFACE + '.disable_ipv6=1'])
     command(['ip', 'addr', 'add', address + '/24', 'dev', INTERFACE])
     command(['ip', 'link', 'set', INTERFACE, 'up'])
@@ -304,9 +355,11 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
         atomic_write(ROOT / 'dnsmasq.conf', dhcp.encode())
         command(['dnsmasq', '--test', '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
     write_json(ROOT / 'tuning.json', tuning)
-    if tuning['band'] == '5':
+    risky = len(plans) > 1 or tuning.get('band') == '5'
+    if risky:
         ap_tuning.mark_pending(radio_settings)
-    ap = launch('hostapd', ['hostapd', str(ROOT / 'hostapd.conf')])
+    hostapds = [launch(x['child'], ['hostapd', str(ROOT / (x['child'] + '.conf'))]) for x in plans]
+    ap = hostapds[0]
     dhcp_process = launch('dnsmasq', ['dnsmasq', '--keep-in-foreground',
                                    '--pid-file=' + str(ROOT / 'dnsmasq.pid'),
                                    '--conf-file=' + str(ROOT / 'dnsmasq.conf')])
@@ -319,7 +372,8 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
             raise RuntimeError('AP guard exited; controller must clean up')
         if not alive({'pid': parent_pid, 'start': parent_start}):
             (ROOT / 'stop').touch()
-        if not (ROOT / 'cleaning').exists() and (ap.poll() is not None or dhcp_process.poll() is not None):
+        if not (ROOT / 'cleaning').exists() and (any(h.poll() is not None for h in hostapds)
+                                                  or dhcp_process.poll() is not None):
             (ROOT / 'stop').touch()
         if not (ROOT / 'stop').exists():
             firewall_guard.require(firewall)
@@ -327,9 +381,11 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
                 (ROOT / 'stop').touch()
                 continue
             atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
-            response = command(['hostapd_cli', '-p', str(ROOT / 'control'), '-i', INTERFACE, 'status'], check=False)
-            ready = 'state=ENABLED' in response.stdout.splitlines()
-            if ready and tuning['band'] == '5':
+            responses = [command(['hostapd_cli', '-p', str(ROOT / 'control'), '-i', x['names']['ap'], 'status'],
+                                 check=False) for x in plans]
+            response = responses[0]
+            ready = all('state=ENABLED' in r.stdout.splitlines() for r in responses)
+            if ready and risky:
                 ap_tuning.clear_pending()
             if not ready and time.monotonic() > startup_deadline:
                 (ROOT / 'stop').touch()
@@ -387,13 +443,14 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
                        'ssid': ssid, 'internet': internet, 'dns': advertised_dns or '',
                        'firewall_generation': firewall_guard.firewall_config.generation(firewall)})
         time.sleep(2)
-    ap.wait(timeout=5)
+    for h in hostapds:
+        h.wait(timeout=5)
     dhcp_process.wait(timeout=5)
 
 
-def serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=False):
+def serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=False, dual=False):
     try:
-        return _serve(ssid, parent_pid, parent_start, role_settings, local_starlink)
+        return _serve(ssid, parent_pid, parent_start, role_settings, local_starlink, dual)
     except firewall_guard.Changed:
         return
     finally:
@@ -416,6 +473,6 @@ if __name__ == '__main__':
     elif sys.argv[1] == 'serve':
         serve(sys.argv[2], int(sys.argv[3]), sys.argv[4],
               {'vehicle_ap': sys.argv[5], 'usb_identity': sys.argv[6]} if len(sys.argv) > 6 else None,
-              len(sys.argv) > 7 and sys.argv[7] == '1')
+              len(sys.argv) > 7 and sys.argv[7] == '1', len(sys.argv) > 8 and sys.argv[8] == '1')
     else:
         raise ValueError('Unknown AP command')

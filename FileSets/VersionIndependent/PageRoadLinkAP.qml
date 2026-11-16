@@ -29,19 +29,21 @@ MbPage {
             ]
         }
         MbItemValue { description: qsTr("Funkbetrieb"); item.bind: "com.coyodude.roadlink/AP/Radio" }
+        MbItemValue { description: qsTr("Funkmodule"); item.bind: "com.coyodude.roadlink/AP/Mode" }
         MbItemOptions {
             description: qsTr("Frequenzband")
             bind: "com.coyodude.roadlink/AP/Band"
             writeAccessLevel: User.AccessInstaller
             possibleValues: [
                 MbOption { description: qsTr("2,4 GHz (Reichweite)"); value: "2.4" },
-                MbOption { description: qsTr("5 GHz (schneller)"); value: "5" }
+                MbOption { description: qsTr("5 GHz (schneller)"); value: "5" },
+                MbOption { description: qsTr("Beide (2,4 + 5 GHz)"); value: "both" }
             ]
         }
         MbItemOptions {
-            description: qsTr("Kanal")
-            bind: "com.coyodude.roadlink/AP/Channel"
-            show: apBand.value === "2.4"
+            description: qsTr("Kanal 2,4 GHz")
+            bind: "com.coyodude.roadlink/AP/Channel24"
+            show: apBand.value === "2.4" || apBand.value === "both"
             writeAccessLevel: User.AccessInstaller
             possibleValues: [
                 MbOption { description: "1"; value: 1 },
@@ -50,9 +52,9 @@ MbPage {
             ]
         }
         MbItemOptions {
-            description: qsTr("Kanal")
-            bind: "com.coyodude.roadlink/AP/Channel"
-            show: apBand.value === "5"
+            description: qsTr("Kanal 5 GHz")
+            bind: "com.coyodude.roadlink/AP/Channel5"
+            show: apBand.value === "5" || apBand.value === "both"
             writeAccessLevel: User.AccessInstaller
             possibleValues: [
                 MbOption { description: "36"; value: 36 },

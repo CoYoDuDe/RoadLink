@@ -12,7 +12,10 @@ from pathlib import Path
 
 SETTINGS = Path('/data/setupOptions/RoadLink/ap-radio.json')
 PENDING = Path('/run/roadlink-ap-radio-pending.json')
-DEFAULT = {'band': '5', 'channel': 36, 'width': 'auto', 'country': 'DE', 'security': 'wpa2'}
+# 'both': both radios transmit the same SSID (USB/ALFA 2.4 GHz, internal 5 GHz).
+DEFAULT = {'band': 'both', 'channel_24': 6, 'channel_5': 36, 'width': 'auto', 'country': 'DE',
+           'security': 'wpa2'}
+BANDS = ('2.4', '5', 'both')
 SECURITY = ('wpa2', 'wpa2_wpa3', 'wpa3')
 FALLBACK = {'band': '2.4', 'channel': 6, 'width': 20}
 CHANNELS = {'2.4': (1, 6, 11), '5': (36, 40, 44, 48)}
@@ -24,12 +27,21 @@ HT40_5 = {36: '+', 40: '-', 44: '+', 48: '-'}
 def validate(value):
     if not isinstance(value, dict):
         raise ValueError('Invalid AP radio settings')
+    value = dict(value)
+    if 'channel' in value:  # v0.27.1 schema: one channel for the single band
+        channel = value.pop('channel')
+        if value.get('band') == '2.4':
+            value.setdefault('channel_24', channel)
+        elif value.get('band') == '5':
+            value.setdefault('channel_5', channel)
     value = dict(DEFAULT, **value)
     if set(value) != set(DEFAULT):
         raise ValueError('Unknown AP radio settings')
-    if value['band'] not in CHANNELS or type(value['channel']) is not int \
-            or value['channel'] not in CHANNELS[value['band']]:
-        raise ValueError('Unsupported AP band/channel')
+    if value['band'] not in BANDS:
+        raise ValueError('Unsupported AP band')
+    for key, band in (('channel_24', '2.4'), ('channel_5', '5')):
+        if type(value[key]) is not int or value[key] not in CHANNELS[band]:
+            raise ValueError('Unsupported AP channel')
     if value['width'] not in ('auto', 20, 40, 80):
         raise ValueError('Unsupported AP channel width')
     if value['band'] == '2.4' and value['width'] == 80:
@@ -105,11 +117,23 @@ def caps(body):
             'vht_ldpc': vhas('RX LDPC'), 'vht_tx_stbc': vhas('TX STBC')}
 
 
-def plan(detail, settings, failed_before=False):
-    """Return (directives, summary) for the selected radio's `iw phy` text."""
+def plan(detail, settings, failed_before=False, band=None):
+    """Return (directives, summary) for one radio's `iw phy` text.
+
+    `band` selects the band for this radio; it is required in 'both' mode,
+    where each radio is planned separately. On 2.4 GHz 'auto' width is 20 MHz.
+    """
     settings = validate(settings)
-    choice = dict(settings)
-    if failed_before and settings['band'] == '5':
+    band = settings['band'] if band is None else band
+    if band not in CHANNELS:
+        raise ValueError('A single band is required for one radio')
+    requested_band = band
+    width = settings['width']
+    if band == '2.4' and width != 40:
+        width = 20
+    choice = {'band': band, 'channel': settings['channel_24' if band == '2.4' else 'channel_5'],
+              'width': width}
+    if failed_before and band == '5':
         choice.update(FALLBACK)
     body = band_body(detail, choice['band'])
     if body is None or not permitted(body, choice['channel']):
@@ -161,15 +185,17 @@ def plan(detail, settings, failed_before=False):
             out.append('vht_oper_centr_freq_seg0_idx=' + str(VHT80[channel]))
     summary = {'band': band, 'channel': channel, 'width': width,
                'protocol': '802.11ac' if vht else '802.11n' if c['ht'] else '802.11g',
-               'country': settings['country'], 'fallback': choice['band'] != settings['band'],
+               'country': settings['country'], 'fallback': choice['band'] != requested_band,
                'security': security(settings['security'], detail),
                'security_requested': settings['security']}
     return '\n'.join(out) + '\n', summary
 
 
-def mark_pending(settings, path=PENDING):
-    """Record a 5 GHz attempt; it stays until that plan reached ENABLED."""
-    Path(path).write_text(json.dumps({'settings': validate(settings)}, sort_keys=True))
+def mark_pending(settings, path=PENDING, pid=None):
+    """Record a risky (5 GHz or dual) attempt; it stays until that plan reached ENABLED."""
+    import os
+    Path(path).write_text(json.dumps({'settings': validate(settings),
+                                      'pid': os.getpid() if pid is None else pid}, sort_keys=True))
 
 
 def clear_pending(path=PENDING):
@@ -179,8 +205,23 @@ def clear_pending(path=PENDING):
         pass
 
 
-def failed_before(settings, path=PENDING):
+def _attempt_running(pid, proc=Path('/proc')):
     try:
-        return json.loads(Path(path).read_text()).get('settings') == validate(settings)
-    except (OSError, ValueError):
+        return b'ap_runtime.py' in (proc / str(int(pid)) / 'cmdline').read_bytes()
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def failed_before(settings, path=PENDING, ignore_running=False, proc=Path('/proc')):
+    """True if an attempt with these settings never reached ENABLED.
+
+    With ignore_running (daemon view) an attempt whose AP runtime is still
+    alive is in progress, not failed.
+    """
+    try:
+        marker = json.loads(Path(path).read_text())
+        if marker.get('settings') != validate(settings):
+            return False
+        return not (ignore_running and _attempt_running(marker.get('pid'), proc))
+    except (OSError, ValueError, AttributeError):
         return False

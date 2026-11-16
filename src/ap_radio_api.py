@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import ap_tuning
 
-DEFAULT_CHANNEL = {'2.4': 6, '5': 36}
 WIDTH_CODES = {0: 'auto', 20: 20, 40: 40, 80: 80}
 
 
@@ -28,21 +27,38 @@ def save(value, path=ap_tuning.SETTINGS):
     return value
 
 
+def _number(value):
+    """D-Bus/GUI may deliver numbers as int, float, dbus types or digit strings."""
+    if isinstance(value, bool):
+        raise ValueError('Invalid number')
+    if isinstance(value, str):
+        value = value.strip()
+        if not value.isdigit():
+            raise ValueError('Invalid number')
+        return int(value)
+    number = float(value)
+    if not number.is_integer():
+        raise ValueError('Invalid number')
+    return int(number)
+
+
 def change(current, key, value):
     """Return the complete new settings for one menu edit, or raise ValueError."""
     new = dict(current)
+    if key in ('channel24', 'channel5', 'width'):
+        value = _number(value)
+    elif key in ('band', 'security'):
+        value = str(value)
     if key == 'band':
-        if value not in ('2.4', '5'):
+        if value not in ap_tuning.BANDS:
             raise ValueError('Invalid band')
         new['band'] = value
-        if new['channel'] not in ap_tuning.CHANNELS[value]:
-            new['channel'] = DEFAULT_CHANNEL[value]
         if value == '2.4' and new['width'] == 80:
             new['width'] = 'auto'
-    elif key == 'channel':
-        if type(value) is not int and not (isinstance(value, float) and value.is_integer()):
-            raise ValueError('Invalid channel')
-        new['channel'] = int(value)
+    elif key == 'channel24':
+        new['channel_24'] = value
+    elif key == 'channel5':
+        new['channel_5'] = value
     elif key == 'width':
         if value not in WIDTH_CODES:
             raise ValueError('Invalid width')
@@ -56,6 +72,8 @@ def change(current, key, value):
 
 def describe(tuning):
     """Human-readable active radio state from the AP runtime's tuning.json."""
+    if isinstance(tuning, dict) and isinstance(tuning.get('radios'), list):
+        return ' + '.join(describe(radio) for radio in tuning['radios'])
     if not isinstance(tuning, dict) or 'band' not in tuning:
         return ''
     security = {'wpa2': 'WPA2', 'wpa2_wpa3': 'WPA2/WPA3', 'wpa3': 'WPA3'}.get(tuning.get('security'), '?')
@@ -77,6 +95,7 @@ def install(service, path=ap_tuning.SETTINGS):
         current, status = dict(ap_tuning.DEFAULT), 'Funkeinstellungen ungueltig; neu waehlen'
     service.add_path('/AP/RadioEditStatus', status)
     service.add_path('/AP/Radio', '')
+    service.add_path('/AP/Mode', '')
     width_code = {v: k for k, v in WIDTH_CODES.items()}
 
     def handler(key):
@@ -90,14 +109,16 @@ def install(service, path=ap_tuning.SETTINGS):
             except (ValueError, OSError, TypeError):
                 service['/AP/RadioEditStatus'] = 'Nicht uebernommen: Kombination nicht erlaubt'
                 return False
-            service['/AP/Band'], service['/AP/Channel'] = new['band'], new['channel']
+            service['/AP/Band'] = new['band']
+            service['/AP/Channel24'], service['/AP/Channel5'] = new['channel_24'], new['channel_5']
             service['/AP/Width'], service['/AP/Security'] = width_code[new['width']], new['security']
             service['/AP/RadioEditStatus'] = 'Gespeichert; Fahrzeug-WLAN startet neu'
             return True
         return callback
 
     service.add_path('/AP/Band', current['band'], writeable=True, onchangecallback=handler('band'))
-    service.add_path('/AP/Channel', current['channel'], writeable=True, onchangecallback=handler('channel'))
+    service.add_path('/AP/Channel24', current['channel_24'], writeable=True, onchangecallback=handler('channel24'))
+    service.add_path('/AP/Channel5', current['channel_5'], writeable=True, onchangecallback=handler('channel5'))
     service.add_path('/AP/Width', width_code[current['width']], writeable=True, onchangecallback=handler('width'))
     service.add_path('/AP/Security', current['security'], writeable=True, onchangecallback=handler('security'))
 

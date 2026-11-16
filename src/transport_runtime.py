@@ -14,7 +14,7 @@ def clear(command, namespace=Path('/run/netns/roadlink-wan')):
         return False
     links = json.loads(command(['ip', '-j', 'link', 'show']).stdout)
     if any(item['ifname'] in ('aproadlink', 'wgroadlink', 'rlwanhost', 'rlwanpeer', 'disabledrlwan', 'disabledrlap',
-                            'rlportalhost', 'rlportalpeer')
+                            'rlportalhost', 'rlportalpeer', 'aprl24', 'aprl5', 'disabledrlap5')
            for item in links):
         return False
     rules = command(['ip', 'rule', 'show']).stdout

@@ -18,7 +18,7 @@ from pathlib import Path
 BLOCKED = Path('/data/setupOptions/RoadLink/blocked-clients.json')
 CONTROL = Path('/run/roadlink-ap/control')
 LEASES = Path('/run/roadlink-ap/leases')
-INTERFACE = 'aproadlink'
+INTERFACE = 'aproadlink'  # single radio; dual-band uses one hostapd per bridge port
 SLOTS = 16
 MAC = re.compile(r'[0-9a-f]{2}(?::[0-9a-f]{2}){5}')
 NAME = re.compile(r'[A-Za-z0-9 ._+-]{1,40}')
@@ -107,15 +107,24 @@ def title(row):
     return ' – '.join(parts)
 
 
-def hostapd(args, control=CONTROL):
-    return subprocess.run(['hostapd_cli', '-p', str(control), '-i', INTERFACE, *args],
+def interfaces(control=CONTROL):
+    """hostapd creates one control socket per AP interface it serves."""
+    try:
+        names = sorted(item.name for item in Path(control).iterdir() if item.is_socket())
+    except OSError:
+        return []
+    return [name for name in names if name in ('aproadlink', 'aprl24', 'aprl5')]
+
+
+def hostapd(args, control=CONTROL, interface=INTERFACE):
+    return subprocess.run(['hostapd_cli', '-p', str(control), '-i', interface, *args],
                           capture_output=True, text=True, timeout=3)
 
 
 class Clients:
     def __init__(self, service, blocked_path=BLOCKED, control=CONTROL, leases=LEASES, run=None, clock=time.monotonic):
         self.service, self.path, self.control, self.leases = service, Path(blocked_path), Path(control), Path(leases)
-        self.run = run or (lambda args: hostapd(args, self.control))
+        self.run = run or (lambda args: self._all(args))
         self.clock, self.next = clock, 0
         self.macs = [''] * SLOTS
         service.add_path('/Clients/Count', 0)
@@ -126,6 +135,15 @@ class Clients:
                 service.add_path('/Clients/{}/{}'.format(i, key), value)
             service.add_path('/Clients/{}/Blocked'.format(i), 0, writeable=True,
                              onchangecallback=lambda path, value, i=i: self.block(i, value))
+
+    def _all(self, args):
+        """Run a hostapd_cli command on every active AP interface; merge outputs."""
+        outputs, code = [], 1
+        for name in interfaces(self.control) or [INTERFACE]:
+            result = hostapd(args, self.control, name)
+            outputs.append(result.stdout)
+            code = min(code, result.returncode)
+        return subprocess.CompletedProcess(args, code, ''.join(outputs), '')
 
     def update(self, force=False):
         if not force and self.clock() < self.next:

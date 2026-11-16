@@ -167,6 +167,8 @@ def main():
         return load_json(root / 'result.json', {}).get('cleaned') is not True
 
     barrier = Barrier(stop_transport, transport_busy, lambda: transport_clear(command))
+    import ap_dual
+    dual = ap_dual.Decision()
 
     def refresh():
         nonlocal worker, signature, failed, vpn_worker, vpn_signature, vpn_retry_at, ap_retry_at
@@ -179,7 +181,11 @@ def main():
             safe_mode = Path('/data/setupOptions/RoadLink/SAFE_MODE').exists()
             try:
                 role_config = radio_roles.read()
-                radio_key = radio_roles.generation(role_config)
+                # Dual-band ownership moves the internal radio between WAN and AP;
+                # it therefore uses the same fully drained handover as a role change.
+                radio_key = (radio_roles.generation(role_config),
+                             dual.update(load_json(VPN_ROOT / 'status.json', {}),
+                                         transport_settings()['vpn_required']))
                 # Policy edits use the same fully drained transport handover.
                 # A malformed private policy selects off; never default allow.
                 firewall = firewall_config.read()
@@ -221,7 +227,7 @@ def main():
             vpn_requested = bool(wanted == 'vpn' and configuration and configuration['enabled']
                 and not Path('/data/setupOptions/RoadLink/SAFE_MODE').exists())
             vpn_current = repr(configuration) if vpn_requested else None
-            wan_requested = bool(settings['wan_enabled'] and wanted != 'off')
+            wan_requested = bool(settings['wan_enabled'] and wanted != 'off' and not dual.active)
             hostname = client_name(str(settings['client_name']))
             service['/WifiWan/ClientName'] = hostname
             wan_current = (repr(configuration) if use_vpn else repr(direct_dns(dns_settings())),
@@ -391,7 +397,7 @@ def main():
                          AP_SECRET.stat().st_mtime_ns if AP_SECRET.exists() else 0,
                          ap_radio_api.signature(),
                          repr(routed_dns(configuration, vpn_state)) if use_vpn else 'direct', use_vpn,
-                         bool(settings['starlink_local']))
+                         dual.active, bool(settings['starlink_local']))
             if wanted == 'off':
                 requested = (False, *requested[1:])
             if requested != signature:
@@ -411,7 +417,7 @@ def main():
                     worker = subprocess.Popen([sys.executable, str(Path(__file__).with_name('ap_runtime.py')),
                                                'serve', requested[1], str(os.getpid()), token(os.getpid()),
                                                role_config['vehicle_ap'], role_config['usb_identity'],
-                                               '1' if requested[-1] else '0'])
+                                               '1' if requested[-1] else '0', '1' if dual.active else '0'])
             ap_state = load_json(AP_ROOT / 'status.json', {})
             internet = bool(worker and ap_state.get('internet')
                             and vpn_worker and vpn_state.get('state') == 'READY')
@@ -429,6 +435,7 @@ def main():
                 else 'Aus')
             service['/AP/Address'] = ap_state.get('address', '') if worker else ''
             service['/AP/Radio'] = ap_radio_api.describe(load_json(AP_ROOT / 'tuning.json', {})) if worker else ''
+            service['/AP/Mode'] = dual.text()
             try:
                 ap_clients.update()
             except Exception:
