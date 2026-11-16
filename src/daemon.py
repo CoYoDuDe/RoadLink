@@ -179,6 +179,7 @@ def main():
     dual = ap_dual.Decision()
     import radio_health
     radio_monitor = radio_health.Monitor()
+    ap_traffic = ap_dual.Traffic()
 
     def refresh():
         nonlocal worker, signature, failed, vpn_worker, vpn_signature, vpn_retry_at, ap_retry_at
@@ -198,7 +199,7 @@ def main():
                 service['/Radio/Health'] = radio_monitor.text()
                 radio_key = (radio_roles.generation(role_config), radio_monitor.generation(),
                              dual.update(load_json(VPN_ROOT / 'status.json', {}),
-                                         transport_settings()['vpn_required']))
+                                         transport_settings()['vpn_required'], ap_traffic.busy()))
                 # Policy edits use the same fully drained transport handover.
                 # A malformed private policy selects off; never default allow.
                 firewall = firewall_config.read()

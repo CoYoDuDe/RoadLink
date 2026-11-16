@@ -17,6 +17,7 @@ ENTER_SECONDS = 120
 REENTER_SECONDS = 900  # after a fallback: avoid flapping (each switch drops the WLAN ~1 min)
 LEAVE_SECONDS = 60
 RADIO_CACHE_SECONDS = 30
+BUSY_BYTES_PER_SECOND = 125000  # ~1 Mbit/s on the vehicle WLAN defers an elective switch
 
 
 def uplink_health(vpn_state, use_vpn, sysfs=Path('/sys/class/net')):
@@ -65,7 +66,7 @@ class Decision:
             self.radio_cache = (value, self.clock())
         return value
 
-    def update(self, vpn_state, use_vpn):
+    def update(self, vpn_state, use_vpn, ap_busy=False):
         now = self.clock()
         health = uplink_health(vpn_state, use_vpn)
         if health is True:
@@ -90,8 +91,12 @@ class Decision:
             self.active, self.reason, self.fell_back = False, 'uplink_down', True
         elif (not self.active and self.ok_since is not None
               and now - self.ok_since >= (REENTER_SECONDS if self.fell_back else ENTER_SECONDS)):
-            self.active, self.reason = True, 'dual'
-        elif not self.active and self.reason != 'uplink_down':
+            if ap_busy:
+                # Entering dual restarts the vehicle WLAN; never interrupt active use for it.
+                self.reason = 'busy'
+            else:
+                self.active, self.reason = True, 'dual'
+        elif not self.active and self.reason not in ('uplink_down', 'busy'):
             self.reason = 'waiting'
         return self.active
 
@@ -103,4 +108,25 @@ class Decision:
                 'one_radio': 'Ein Funkmodul (zweites Funkmodul fehlt)',
                 'uplink_down': 'Ein Funkmodul (Starlink/Ethernet gestoert, zweites fuer externe WLANs)',
                 'waiting': 'Ein Funkmodul (wartet auf stabilen Starlink/Ethernet)',
+                'busy': 'Ein Funkmodul (wechselt auf beide, sobald das WLAN ruhig ist)',
                 'dual': 'Ein Funkmodul'}.get(self.reason, 'Ein Funkmodul')
+
+
+class Traffic:
+    """Average vehicle WLAN transmit rate over roughly the last minute."""
+    def __init__(self, path=Path('/sys/class/net/aproadlink/statistics/tx_bytes'), clock=time.monotonic):
+        self.path, self.clock, self.samples = Path(path), clock, []
+
+    def busy(self):
+        try:
+            value = int(self.path.read_text())
+        except (OSError, ValueError):
+            self.samples = []
+            return False
+        now = self.clock()
+        self.samples = [(t, v) for t, v in self.samples if now - t <= 60 and v <= value] + [(now, value)]
+        first_t, first_v = self.samples[0]
+        if now - first_t < 20:
+            return True  # not enough history yet: assume in use, entering dual can wait
+        return (value - first_v) / (now - first_t) >= BUSY_BYTES_PER_SECOND
+
