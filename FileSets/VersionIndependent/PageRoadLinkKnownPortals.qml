@@ -6,7 +6,7 @@ MbPage {
     property var entries: profiles.valid ? JSON.parse(profiles.value) : []
     model: entries.length ? entries : [{id: "", ssid: qsTr("Noch keine bestaetigten Portale"), host: ""}]
     delegate: MbItemOptions {
-        description: modelData.ssid
+        description: String(modelData.ssid).replace(/</g, "\u2039").replace(/>/g, "\u203a")
         text: modelData.host
         bind: modelData.id ? "com.coyodude.roadlink/Portal/Known/Profiles/" + modelData.id + "/AutoAccept" : ""
         writeAccessLevel: User.AccessInstaller

@@ -3,7 +3,7 @@ import com.victron.velib 1.0
 MbPage {
     id: root
     property variant profile: ({})
-    title: profile.ssid || qsTr("WLAN-Profil")
+    title: profile.ssid ? String(profile.ssid).replace(/</g, "\u2039").replace(/>/g, "\u203a") : qsTr("WLAN-Profil")
     model: VisibleItemModel {
         MbItemText { text: qsTr("VPN erforderlich") }
         MbItemText { text: qsTr("Prioritaet: ") + root.profile.priority }

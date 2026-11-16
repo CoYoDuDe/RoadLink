@@ -5,7 +5,7 @@ MbPage {
     property VBusItem results: VBusItem { bind: "com.coyodude.roadlink/Wifi/Scan/Results" }
     model: results.valid ? JSON.parse(results.value) : []
     delegate: MbSubMenu {
-        description: modelData.ssid
+        description: String(modelData.ssid).replace(/</g, "\u2039").replace(/>/g, "\u203a")
         item.text: modelData.signal + " dBm / " + (modelData.security === "psk" ? "WPA2" : modelData.security === "open" ? qsTr("offen") : qsTr("nicht unterstuetzt"))
         enabled: modelData.security !== "unsupported"
         opacity: enabled ? 1 : 0.5

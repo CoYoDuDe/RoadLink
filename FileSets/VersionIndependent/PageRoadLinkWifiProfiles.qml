@@ -5,7 +5,7 @@ MbPage {
     property VBusItem profiles: VBusItem { bind: "com.coyodude.roadlink/Wifi/Profiles" }
     model: [{ssid: qsTr("Neues WLAN hinzufuegen"), newProfile: true}].concat(profiles.valid ? JSON.parse(profiles.value) : [])
     delegate: MbSubMenu {
-        description: modelData.ssid
+        description: String(modelData.ssid).replace(/</g, "\u2039").replace(/>/g, "\u203a")
         item.text: modelData.newProfile ? "" : qsTr("Prioritaet ") + modelData.priority
         subpage: modelData.newProfile ? addPage : detailPage
         Component { id: addPage; PageRoadLinkWifiAdd {} }

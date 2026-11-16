@@ -52,6 +52,13 @@ import ipaddress
 import firewall_config
 
 
+def display_text(value):
+    """Untrusted names (foreign SSIDs) must never be interpreted as Qt rich text."""
+    if not value:
+        return value
+    return str(value).replace('<', '\u2039').replace('>', '\u203a')
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
     DBusGMainLoop(set_as_default=True)
@@ -355,7 +362,7 @@ def main():
                     wifi = []
                     wifi_available = False
                 current = next((n for n in wifi if n['state'] in ('ready', 'online')), None)
-                service['/WifiWan/SSID'] = current['ssid'] if current else 'Nicht verbunden'
+                service['/WifiWan/SSID'] = display_text(current['ssid']) if current else 'Nicht verbunden'
                 service['/WifiWan/State'] = current['state'] if current else ('idle' if wifi_available else 'unavailable')
             else:
                 service['/WifiWan/SSID'] = 'Nicht verfuegbar'
@@ -363,7 +370,7 @@ def main():
             wan_state = load_json(WAN_ROOT / 'status.json', {})
             if wan_worker and alive(load_json(WAN_ROOT / 'guard.json', {})):
                 service['/WifiWan'] = service['/Radio/WanRadio'] + ' (' + wan_state.get('driver', 'startet') + ')'
-                service['/WifiWan/SSID'] = wan_state.get('ssid') or ('Suchmodus, nicht verbunden'
+                service['/WifiWan/SSID'] = display_text(wan_state.get('ssid')) or ('Suchmodus, nicht verbunden'
                     if wan_state.get('state') == 'SCAN_ONLY' else 'Verbindet WLAN')
                 service['/WifiWan/State'] = wan_state.get('state', 'STARTING')
                 service['/Wan/Reason'] = ('WLAN als Reserve verbunden'
