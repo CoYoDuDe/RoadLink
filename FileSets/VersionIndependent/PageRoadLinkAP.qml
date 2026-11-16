@@ -30,6 +30,7 @@ MbPage {
         }
         MbItemValue { description: qsTr("Funkbetrieb"); item.bind: "com.coyodude.roadlink/AP/Radio" }
         MbItemValue { description: qsTr("Funkmodule"); item.bind: "com.coyodude.roadlink/AP/Mode" }
+        MbItemValue { description: qsTr("Zustand Funkmodule"); item.bind: "com.coyodude.roadlink/Radio/Health" }
         MbItemOptions {
             description: qsTr("Frequenzband")
             bind: "com.coyodude.roadlink/AP/Band"
