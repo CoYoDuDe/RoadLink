@@ -118,6 +118,8 @@ def main():
     install_transport_api(service)
     install_radio_api(service)
     ap_radio_api.install(service)
+    import ap_clients_api
+    ap_clients = ap_clients_api.Clients(service)
     from firewall_api import API as FirewallAPI
     firewall_api = FirewallAPI(service, itemtype=SecretItem)
     from portal_manager import Manager as PortalManager
@@ -427,6 +429,10 @@ def main():
                 else 'Aus')
             service['/AP/Address'] = ap_state.get('address', '') if worker else ''
             service['/AP/Radio'] = ap_radio_api.describe(load_json(AP_ROOT / 'tuning.json', {})) if worker else ''
+            try:
+                ap_clients.update()
+            except Exception:
+                logging.exception('Vehicle client list update failed')
             service['/Status'] = (('WLAN-Internet ueber VPN' if use_vpn else 'WLAN-Internet ohne VPN') if internet else
                                   'Lokales WLAN aktiv' if ap_state.get('state') in ('LAN_ONLY', 'VPN_INTERNET', 'DIRECT_INTERNET')
                                   else 'Fahrzeug-WLAN startet') if worker else 'Netzwerkdiagnose'

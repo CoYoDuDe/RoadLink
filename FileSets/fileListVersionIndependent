@@ -5,6 +5,8 @@
 /opt/victronenergy/gui/qml/PageRoadLinkDNS.qml
 /opt/victronenergy/gui/qml/PageRoadLinkDiagnostics.qml
 /opt/victronenergy/gui/qml/PageRoadLinkAP.qml
+/opt/victronenergy/gui/qml/PageRoadLinkClients.qml
+/opt/victronenergy/gui/qml/PageRoadLinkClient.qml
 /opt/victronenergy/gui/qml/RoadLinkPasswordEditor.qml
 /opt/victronenergy/gui/qml/PageRoadLinkWifiAdd.qml
 /opt/victronenergy/gui/qml/PageRoadLinkWifiProfiles.qml

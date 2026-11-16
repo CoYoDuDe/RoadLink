@@ -261,6 +261,13 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
     vpn_status = load_json(Path('/run/roadlink-vpn/status.json'), {})
     routing = ap_router.plan(subnet, routed_dns(vpn, vpn_status), firewall) if vpn and vpn['enabled'] else None
     config += 'ctrl_interface=' + str(ROOT / 'control') + '\n'
+    import ap_clients_api
+    try:
+        blocked_clients = ap_clients_api.read_blocked()
+    except (ValueError, OSError):
+        blocked_clients = {}
+    atomic_write(ROOT / 'client-deny.list', ap_clients_api.deny_file_text(blocked_clients).encode('ascii'))
+    config += 'macaddr_acl=0\ndeny_mac_file=' + str(ROOT / 'client-deny.list') + '\n'
     atomic_write(ROOT / 'hostapd.conf', config.encode())
     dhcp = isolated_dhcp(INTERFACE, subnet).replace('/run/roadlink/ap.leases', str(ROOT / 'leases'))
     atomic_write(ROOT / 'dnsmasq.conf', dhcp.encode())
