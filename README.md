@@ -36,6 +36,8 @@ Unter **Fahrzeug-WLAN → Fahrzeug-WLAN über** das integrierte WLAN oder den US
   Verschlüsselung WPA2 (AES); WPA2/WPA3 und WPA3 sind wählbar, die hostapd-Version von Venus OS kann
   WPA3 derzeit aber nicht – RoadLink nutzt dann sichtbar WPA2.
 - Verbundene Fahrzeuggeräte mit Name, IP und Signal anzeigen und einzeln sperren/freigeben (RoadLink-Hauptmenü).
+- Fällt ein externes WLAN nach längerem stabilem Betrieb einmal aus, wird es nach etwa 1 Minute wieder versucht
+  (früher konnten sich Fehlversuche über den Tag zu 15 Minuten Sperre aufsummieren).
 - Hängt der Treiber eines USB-WLAN-Sticks, wird der Stick automatisch beiseitegelassen und das Fahrzeug-WLAN läuft
   über das andere Funkmodul weiter; nach Abziehen und Wiedereinstecken wird er wieder genutzt.
 - Automatische kostenlose DNSmith-VPN-Einrichtung ohne Konto. Jeder Pi erzeugt seinen eigenen Schlüssel; der private Schlüssel bleibt auf dem Gerät. Die Erstverbindung über USB-WLAN erlaubt ausschließlich DHCP und die festgelegten HTTPS-Ziele für Einrichtung und Internetprüfung. Fahrzeuggeräte erhalten dabei noch keinen Internetzugang.

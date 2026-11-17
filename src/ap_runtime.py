@@ -293,6 +293,11 @@ def _serve(ssid, parent_pid, parent_start, role_settings=None, local_starlink=Fa
         radio_config = hostapd(names['ap'], ssid, secret.get('password', ''), radio=radio_directives,
                                security=radio_tuning['security'])
         radio_config += 'ctrl_interface=' + str(ROOT / 'control') + '\n'
+        # Drop only the IEEE 802.11 logger module (bit 0): a nearby unassociated
+        # device produced ~95 % of all log lines ("disassociated" bursts every 30 s)
+        # and pushed real diagnostics out. AP-STA-CONNECTED/DISCONNECTED and
+        # WPA/handshake failures remain logged.
+        radio_config += 'logger_stdout=126\nlogger_stdout_level=2\n'
         radio_config += 'macaddr_acl=0\ndeny_mac_file=' + str(ROOT / 'client-deny.list') + '\n'
         if len(radios) > 1:
             radio_config += 'bridge=' + INTERFACE + '\n'
