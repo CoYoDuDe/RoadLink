@@ -38,6 +38,9 @@ Unter **Fahrzeug-WLAN → Fahrzeug-WLAN über** das integrierte WLAN oder den US
 - Verbundene Fahrzeuggeräte mit Name, IP und Signal anzeigen und einzeln sperren/freigeben (RoadLink-Hauptmenü).
 - Fällt ein externes WLAN nach längerem stabilem Betrieb einmal aus, wird es nach etwa 1 Minute wieder versucht
   (früher konnten sich Fehlversuche über den Tag zu 15 Minuten Sperre aufsummieren).
+- Band-Steering bei zwei Funkmodulen: 5-GHz-fähige Geräte mit gutem Signal werden beim Verbinden oder sobald sie
+  ruhig sind (keine laufenden Downloads) von 2,4 auf 5 GHz geschoben (kurzes Neuverbinden). Klappt 5 GHz nicht,
+  bleibt das Gerät 6 Stunden lang auf 2,4 GHz. Abschalten: Datei /data/setupOptions/RoadLink/NO_BAND_STEERING anlegen.
 - Hängt der Treiber eines USB-WLAN-Sticks, wird der Stick automatisch beiseitegelassen und das Fahrzeug-WLAN läuft
   über das andere Funkmodul weiter; nach Abziehen und Wiedereinstecken wird er wieder genutzt.
 - Automatische kostenlose DNSmith-VPN-Einrichtung ohne Konto. Jeder Pi erzeugt seinen eigenen Schlüssel; der private Schlüssel bleibt auf dem Gerät. Die Erstverbindung über USB-WLAN erlaubt ausschließlich DHCP und die festgelegten HTTPS-Ziele für Einrichtung und Internetprüfung. Fahrzeuggeräte erhalten dabei noch keinen Internetzugang.
