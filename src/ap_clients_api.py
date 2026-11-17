@@ -122,8 +122,10 @@ def hostapd(args, control=CONTROL, interface=INTERFACE):
 
 
 class Clients:
-    def __init__(self, service, blocked_path=BLOCKED, control=CONTROL, leases=LEASES, run=None, clock=time.monotonic):
+    def __init__(self, service, blocked_path=BLOCKED, control=CONTROL, leases=LEASES, run=None, clock=time.monotonic,
+                 steer=None):
         self.service, self.path, self.control, self.leases = service, Path(blocked_path), Path(control), Path(leases)
+        self.steer = steer  # ap_steer.Steerer or None
         self.run = run or (lambda args: self._all(args))
         self.clock, self.next = clock, 0
         self.macs = [''] * SLOTS
@@ -166,6 +168,8 @@ class Clients:
         except OSError:
             leases = {}
         current = rows(stations, leases, blocked)
+        if self.steer is not None:
+            self._steer(blocked)
         self.service['/Clients/Count'] = sum(1 for r in current if r['online'])
         for i in range(SLOTS):
             row = current[i] if i < len(current) else None
@@ -180,6 +184,22 @@ class Clients:
             self.service[prefix + 'Signal'] = '{} dBm'.format(row['signal']) if row and row['signal'] is not None else ''
             self.service[prefix + 'Connected'] = ('{} min'.format(row['connected'] // 60)
                                                  if row and row['connected'] is not None else '')
+
+    def _steer(self, blocked):
+        import ap_steer
+        names = interfaces(self.control)
+        per = {}
+        for name in (ap_steer.LOW, ap_steer.HIGH):
+            if name in names:
+                try:
+                    result = hostapd(['all_sta'], self.control, name)
+                    per[name] = parse_stations(result.stdout) if result.returncode == 0 else {}
+                except (OSError, subprocess.SubprocessError):
+                    per[name] = {}
+        # Without a fresh 5 GHz list, never judge a pending steer as failed or done.
+        if ap_steer.HIGH in names and ap_steer.HIGH not in per:
+            return
+        self.steer.tick(names, per.get(ap_steer.LOW, {}), per.get(ap_steer.HIGH, {}), blocked)
 
     def block(self, index, value):
         mac = self.macs[index] if 0 <= index < SLOTS else ''

@@ -127,7 +127,9 @@ def main():
     ap_radio_api.install(service)
     service.add_path('/Radio/Health', '')
     import ap_clients_api
-    ap_clients = ap_clients_api.Clients(service)
+    import ap_steer, time as steer_time
+    ap_clients = ap_clients_api.Clients(service, steer=ap_steer.Steerer(
+        lambda interface, args: ap_clients_api.hostapd(args, interface=interface).stdout, steer_time.monotonic))
     from firewall_api import API as FirewallAPI
     firewall_api = FirewallAPI(service, itemtype=SecretItem)
     from portal_manager import Manager as PortalManager
