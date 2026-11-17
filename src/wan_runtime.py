@@ -41,6 +41,7 @@ from runtime_lock import (busy as runtime_locked, cleanup_with_retry,
                           ChildrenNotStopped, ParentNameOccupied)
 
 ROOT = Path('/run/roadlink-wan')
+STABLE_RESET_SECONDS = 600
 NS = 'roadlink-wan'
 RADIO = 'disabledrlwan'
 LOCK_FD = None
@@ -429,6 +430,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
         quality = Recorder()
         lease_attempt = LeaseAttempt()
         latency_ms = None
+        stable_since = None
         while not (ROOT / 'stop').exists():
             if not alive({'pid': parent_pid, 'start': parent_start}): break
             if transport_settings()['vpn_required'] != use_vpn or radio_roles.read() != role_settings: break
@@ -645,6 +647,11 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                             or (supplicant and not leased and lease_attempt.expired(time.monotonic())))
             # An isolated VPN-server penalty alone is not a WLAN-quality failure.
             quality_failed = rejected and bool(failed or (health_failures >= 2 and not proven) or not leased)
+            # Ten proven, healthy minutes clear this profile's failure backoff.
+            stable = bool(proven and last_health and not health_failures and not rejected)
+            stable_since = (stable_since or time.monotonic()) if stable else None
+            if stable_since is not None and time.monotonic() - stable_since >= STABLE_RESET_SECONDS:
+                candidates.succeeded(profile['id'])
             if quality.consider(Profiles(), profile, started, proven,
                                 bool(last_health and not health_failures), latency_ms,
                                 quality_failed, time.monotonic(), time.time()):

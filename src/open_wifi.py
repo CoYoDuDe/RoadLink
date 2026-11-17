@@ -11,6 +11,12 @@ class Candidates:
         self.enabled = bool(enabled)
         self.blocked, self.failures = {}, {}
 
+    def succeeded(self, identifier):
+        """A link that stayed proven forgets earlier failures, so one later
+        drop of the only usable WLAN starts again at the short backoff."""
+        self.failures.pop(identifier, None)
+        self.blocked.pop(identifier, None)
+
     def reject(self, identifier, now):
         count = min(self.failures.get(identifier, 0) + 1, 5)
         self.failures[identifier] = count
