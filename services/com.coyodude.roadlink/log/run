@@ -1,2 +1,2 @@
 #!/bin/sh
-exec multilog t s25000 n4 /var/log/com.coyodude.roadlink
+exec multilog t s1000000 n10 /var/log/com.coyodude.roadlink
