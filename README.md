@@ -35,7 +35,9 @@ Unter **Fahrzeug-WLAN → Fahrzeug-WLAN über** das integrierte WLAN oder den US
   Kanal je Band, Kanalbreite (automatisch/20/40/80 MHz), Ländereinstellung Deutschland, 5 GHz auf 36–48.
   Verschlüsselung WPA2 (AES); WPA2/WPA3 und WPA3 sind wählbar, die hostapd-Version von Venus OS kann
   WPA3 derzeit aber nicht – RoadLink nutzt dann sichtbar WPA2.
-- Verbundene Fahrzeuggeräte mit Name, IP und Signal anzeigen und einzeln sperren/freigeben.
+- Verbundene Fahrzeuggeräte mit Name, IP und Signal anzeigen und einzeln sperren/freigeben (RoadLink-Hauptmenü).
+- Hängt der Treiber eines USB-WLAN-Sticks, wird der Stick automatisch beiseitegelassen und das Fahrzeug-WLAN läuft
+  über das andere Funkmodul weiter; nach Abziehen und Wiedereinstecken wird er wieder genutzt.
 - Automatische kostenlose DNSmith-VPN-Einrichtung ohne Konto. Jeder Pi erzeugt seinen eigenen Schlüssel; der private Schlüssel bleibt auf dem Gerät. Die Erstverbindung über USB-WLAN erlaubt ausschließlich DHCP und die festgelegten HTTPS-Ziele für Einrichtung und Internetprüfung. Fahrzeuggeräte erhalten dabei noch keinen Internetzugang.
 - Unter **Internet und Umschaltung → VPN-Anbieter** zwischen DNSmith und eigenem WireGuard-Server wechseln. Beide Konfigurationen bleiben lokal gespeichert. Für den eigenen Server den angezeigten Geräte-Public-Key dort registrieren und Serveradresse, Port, Server-Public-Key, Clientadresse und VPN-DNS eintragen.
 - Externe WLANs suchen, hinzufügen, bearbeiten und entfernen; WPA2 oder offen.
