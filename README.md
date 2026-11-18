@@ -46,6 +46,8 @@ Unter **Fahrzeug-WLAN → Fahrzeug-WLAN über** das integrierte WLAN oder den US
   Aussetzer trennt die Verbindung nicht mehr. Der Grund für jedes Verlassen eines WLANs steht jetzt im RoadLink-Log.
 - Läuft der VPN-Tunnel über ein externes WLAN, nutzt er kleinere Pakete (MTU 1280). Viele Hotspots hinter Richtfunk-,
   Mobilfunk- oder DSL-Strecken verlieren große Pakete, dadurch hingen Webseiten trotz Verbindung. Über Starlink bleibt es bei 1380.
+- Nach dem Verbinden mit einem externen WLAN bekommt die Verbindung 3 Minuten Anlaufzeit, bevor fehlgeschlagene
+  Prüfungen zum Verlassen führen (langsame Hotspots brauchen oft 1–2 Minuten, bis der VPN-Tunnel steht).
 - Hängt der Treiber eines USB-WLAN-Sticks, wird der Stick automatisch beiseitegelassen und das Fahrzeug-WLAN läuft
   über das andere Funkmodul weiter; nach Abziehen und Wiedereinstecken wird er wieder genutzt.
 - Automatische kostenlose DNSmith-VPN-Einrichtung ohne Konto. Jeder Pi erzeugt seinen eigenen Schlüssel; der private Schlüssel bleibt auf dem Gerät. Die Erstverbindung über USB-WLAN erlaubt ausschließlich DHCP und die festgelegten HTTPS-Ziele für Einrichtung und Internetprüfung. Fahrzeuggeräte erhalten dabei noch keinen Internetzugang.

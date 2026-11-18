@@ -42,6 +42,8 @@ from runtime_lock import (busy as runtime_locked, cleanup_with_retry,
 
 ROOT = Path('/run/roadlink-wan')
 STABLE_RESET_SECONDS = 600
+# Seconds after a lease before failed probes may make RoadLink leave the WLAN.
+STARTUP_GRACE_SECONDS = 180
 NS = 'roadlink-wan'
 RADIO = 'disabledrlwan'
 LOCK_FD = None
@@ -431,6 +433,7 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
         lease_attempt = LeaseAttempt()
         latency_ms = None
         stable_since = None
+        leased_since = None
         while not (ROOT / 'stop').exists():
             if not alive({'pid': parent_pid, 'start': parent_start}): break
             if transport_settings()['vpn_required'] != use_vpn or radio_roles.read() != role_settings: break
@@ -643,7 +646,12 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
             captive_wait = portal_wait.allow(binding if leased else None, portal_result, time.monotonic(), proven=proven)
             first_probe = (leased and portal and portal.poll() is None
                            and time.monotonic()-portal_started < 22 and not portal_result)
-            rejected = bool(failed or (((health_failures >= 2 and not proven) or tunnel_failed) and not captive_wait and not first_probe)
+            # Start-up grace: on slow, lossy hotspots the first probes and the
+            # tunnel often fail for a minute or two before the VPN is proven.
+            leased_since = (leased_since or time.monotonic()) if leased else None
+            starting = bool(leased and not proven and time.monotonic() - leased_since < STARTUP_GRACE_SECONDS)
+            rejected = bool(failed or (((health_failures >= 2 and not proven) or tunnel_failed) and not captive_wait and not first_probe
+                                       and not starting)
                             or (supplicant and not leased and lease_attempt.expired(time.monotonic())))
             # An isolated VPN-server penalty alone is not a WLAN-quality failure.
             quality_failed = rejected and bool(failed or (health_failures >= 2 and not proven) or not leased)
