@@ -5,6 +5,8 @@ import socket
 import struct
 from probe_binding import bind_path
 
+WAITS = (1.5, 1.5)  # s per send; both resolvers together stay below 6 s
+
 
 def probe(source, resolver, interface=None, mark=None):
     identifier = int.from_bytes(os.urandom(2), 'big')
@@ -14,11 +16,21 @@ def probe(source, resolver, interface=None, mark=None):
         source = str(ipaddress.IPv4Interface(source).ip)
         resolver = str(ipaddress.IPv4Address(resolver))
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.settimeout(2)
             bind_path(sock, source, interface, mark)
             sock.connect((resolver, 53))
-            sock.send(request)
-            response = sock.recv(4096)
+            # One lost UDP datagram on a lossy multi-hop hotspot must not
+            # fail the probe: resend once; a late answer to either counts.
+            response = None
+            for wait in WAITS:
+                sock.send(request)
+                sock.settimeout(wait)
+                try:
+                    response = sock.recv(4096)
+                    break
+                except socket.timeout:
+                    continue
+            if response is None:
+                return False
         ident, flags, questions, answers, _, _ = struct.unpack('!6H', response[:12])
         return (ident == identifier and bool(flags & 0x8000) and not flags & 0x7A0F
                 and questions == 1 and answers > 0 and response[12:12 + len(question)] == question)

@@ -22,6 +22,9 @@ from policy import Selector, Link, MODES
 from dns_health import choose as choose_dns
 from transport_config import read as transport_settings
 
+# Tunnel DNS failures in a row (10 s apart) before the uplink is penalised.
+DNS_PENALTY_FAILURES = 3
+
 ROOT = Path('/run/roadlink-vpn')
 INTERFACE = 'wgroadlink'
 ALIAS = 'roadlink-vpn-owned'
@@ -295,6 +298,7 @@ def serve(parent_pid, parent_start):
     dns_failures = 0
     health = {}
     tunnel_https = False
+    tunnel_failures = 0
     mode = 'AUTO'
     while not (ROOT / 'stop').exists():
         if not alive({'pid': parent_pid, 'start': parent_start}):
@@ -335,12 +339,21 @@ def serve(parent_pid, parent_start):
                 command(['wg', 'set', INTERFACE, 'peer', config['public_key'], 'allowed-ips', '0.0.0.0/0',
                          'endpoint', config['endpoint'] + ':' + str(config['port']), 'persistent-keepalive', '15'])
                 active, selected_route, dns_ready, dns_failures = desired, route, False, 0
-            active_dns = choose_dns(config)
+                tunnel_https, tunnel_failures, active_dns = False, 0, None
+            atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
+            resolved = choose_dns(config)
+            # Same hysteresis as the HTTPS probe: one missed answer keeps the
+            # resolver; the penalty below still needs consecutive failures.
+            dns_failures = 0 if resolved else dns_failures + 1
+            active_dns = resolved or (active_dns if dns_failures < 2 else None)
             dns_ready, last_probe = bool(active_dns), time.monotonic()
             atomic_write(ROOT / 'heartbeat', str(time.monotonic()).encode())
-            tunnel_https = https_probe(INTERFACE, str(ipaddress.IPv4Interface(config['address']).ip))['healthy'] if dns_ready else False
-            dns_failures = 0 if dns_ready else dns_failures + 1
-            if active and dns_failures >= 2:
+            probed = https_probe(INTERFACE, str(ipaddress.IPv4Interface(config['address']).ip))['healthy'] if dns_ready else False
+            # A single lost probe on a slow multi-hop hotspot keeps the tunnel
+            # ready; two consecutive failures (about 20 s) withdraw it.
+            tunnel_failures = 0 if probed else tunnel_failures + 1
+            tunnel_https = probed or (tunnel_https and tunnel_failures < 2)
+            if active and dns_failures >= DNS_PENALTY_FAILURES:
                 penalties[active] = time.monotonic() + 60
                 if active == 'wifi': wifi_penalty_profile = wan.get('profile_id', '')
         # Date the current route observation independently of slow probes.

@@ -657,6 +657,11 @@ def serve(parent_pid, parent_start, hostname='', auto_open=False, auto_enroll=Fa
                                 quality_failed, time.monotonic(), time.time()):
                 candidates.profiles = list(Profiles().data['profiles'].values())
             if rejected:
+                reason = ('process_exit' if failed else 'tunnel_penalty' if tunnel_failed
+                          else 'health' if health_failures >= 2 else 'lease_timeout')
+                print('WAN: leaving %s (%s, health_failures=%d, proven=%s)'
+                      % (profile.get('ssid', '?'), reason, health_failures, bool(proven)),
+                      file=sys.stderr, flush=True)
                 stop_children(); supplicant = dhcp = None
                 candidates.reject(profile['id'], time.monotonic())
                 profile = None

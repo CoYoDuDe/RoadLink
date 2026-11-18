@@ -10,6 +10,11 @@ from probe_binding import bind_path
 
 ADDRESS = '1.1.1.1'
 NAME = 'one.one.one.one'
+# Hotspots behind several radio hops answer in 0.6-2 s; TCP + TLS + HTTP need
+# about four round trips. The whole probe stays below the 8 s command timeout
+# and the 10 s heartbeat freshness of its callers.
+BUDGET = 7.0
+PHASE = 4.0
 
 
 DIAGNOSTIC_SOCKET = '/dev/log'
@@ -38,10 +43,18 @@ def _diagnose(interface, phase, error, status=None, error_number=None):
 
 def probe(interface, source=None, mark=None):
     started = time.monotonic()
+    budget_end = started + BUDGET
+
+    def limit():
+        remaining = budget_end - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('HTTPS probe budget')
+        return min(PHASE, remaining)
+
     phase = 'SOCKET_SETUP'
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(2)
+            sock.settimeout(limit())
             phase = 'BIND'
             bind_path(sock, source, interface, mark)
             phase = 'TCP_CONNECT'
@@ -49,13 +62,14 @@ def probe(interface, source=None, mark=None):
             phase = 'TLS_CONTEXT'
             context = ssl.create_default_context()
             phase = 'TLS_HANDSHAKE'
+            sock.settimeout(limit())
             with context.wrap_socket(sock, server_hostname=NAME) as secure:
                 phase = 'HTTP_SEND'
                 secure.sendall(b'HEAD / HTTP/1.1\r\nHost: one.one.one.one\r\nConnection: close\r\n\r\n')
                 # TLS records may split a valid status line at any byte.
-                # Keep the previous two-second read budget across all reads.
+                # All reads share one deadline inside the probe budget.
                 phase = 'HTTP_READ'
-                deadline = time.monotonic() + 2
+                deadline = time.monotonic() + limit()
                 status = b''
                 while b'\r\n' not in status and len(status) < 1024:
                     remaining = deadline - time.monotonic()
