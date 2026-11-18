@@ -24,6 +24,14 @@ from transport_config import read as transport_settings
 
 # Tunnel DNS failures in a row (10 s apart) before the uplink is penalised.
 DNS_PENALTY_FAILURES = 3
+# External hotspots (radio-link chains, tethering, PPPoE) often lose large
+# packets; the IPv6 minimum MTU keeps the tunnel usable there (Kiosk 2026-11-18).
+WIFI_MTU = 1280
+
+
+def route_mtu(config, uplink):
+    mtu = int(config['mtu'])
+    return min(mtu, WIFI_MTU) if uplink == 'wifi' else mtu
 
 ROOT = Path('/run/roadlink-vpn')
 INTERFACE = 'wgroadlink'
@@ -333,6 +341,7 @@ def serve(parent_pid, parent_start):
             route = {'ethernet': eth, 'wifi': wifi}.get(desired)
             if route != selected_route or desired != active:
                 vpn_transport.select(config, route, command)
+                command(['ip', 'link', 'set', INTERFACE, 'mtu', str(route_mtu(config, desired))])
                 # Recreate the peer to discard its cached local source address
                 # when switching uplinks. Its private key/interface stay put.
                 command(['wg', 'set', INTERFACE, 'peer', config['public_key'], 'remove'])
