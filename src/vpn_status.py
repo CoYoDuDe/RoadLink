@@ -12,6 +12,9 @@ import wan_lease
 
 ROOT=Path('/run/roadlink-vpn')
 WAN=Path('/run/roadlink-wan')
+# One VPN probe cycle is 10 s plus up to ~7 s Ethernet, ~8 s WLAN and ~6 s DNS probes on
+# slow uplinks (v0.27.6 budgets); 30 s let a valid proof expire between two cycles.
+PROOF_MAX_AGE=60
 FILES={'binding':'connection','lease':'lease','state':'state','controller':'controller','guard':'guard','dhcp':'dhcp'}
 
 
@@ -22,7 +25,7 @@ def verified(status,binding,lease,owners,now):
         scalar={key:lease[key] for key in ('address','gateway')}
         if (expected!=binding or not wan_lease.current(lease,binding)
                 or any(type(v) not in (int,float) or not math.isfinite(v) for v in (stamp,now))
-                or not 0<=now-stamp<=30
+                or not 0<=now-stamp<=PROOF_MAX_AGE
                 or status.get('state')!='READY' or status.get('internet') is not True
                 or status.get('dns_ready') is not True or not status.get('dns')
                 or status.get('wan')!='wifi' or status.get('wifi_profile_id')!=binding['profile_id']
